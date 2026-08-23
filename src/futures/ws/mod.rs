@@ -1,57 +1,7 @@
-//! Kraken Futures WebSocket API client.
+//! Kraken Futures WebSocket API client with public and private feeds.
 //!
-//! This module provides a WebSocket client for the Kraken Futures API,
-//! supporting both public market data feeds and authenticated private feeds.
-//!
-//! ## Features
-//!
-//! - Real-time market data (ticker, order book, trades)
-//! - Private feeds (orders, fills, positions, balances)
-//! - Automatic reconnection with exponential backoff
-//! - Subscription restoration after reconnect
-//! - Challenge-based authentication
-//!
-//! ## Quick Start
-//!
-//! ```rust,ignore
-//! use kraken_api_client::futures::ws::{FuturesWsClient, feeds};
-//! use futures_util::StreamExt;
-//!
-//! // Connect to public feeds
-//! let client = FuturesWsClient::new();
-//! let mut stream = client.connect_public().await?;
-//!
-//! // Subscribe to ticker for BTC perpetual
-//! stream.subscribe_public(feeds::TICKER, vec!["PI_XBTUSD"]).await?;
-//!
-//! while let Some(msg) = stream.next().await {
-//!     println!("Message: {:?}", msg);
-//! }
-//! ```
-//!
-//! ## Authentication
-//!
-//! The Futures WebSocket API uses challenge-based authentication:
-//!
-//! 1. Request a challenge with your API key
-//! 2. Sign the challenge using HMAC-SHA512(SHA256(challenge), secret)
-//! 3. Include both original and signed challenge in private subscriptions
-//!
-//! ```rust,ignore
-//! use kraken_api_client::futures::ws::FuturesWsClient;
-//! use kraken_api_client::auth::StaticCredentials;
-//! use std::sync::Arc;
-//!
-//! let credentials = Arc::new(StaticCredentials::new("api_key", "api_secret"));
-//! let client = FuturesWsClient::new();
-//!
-//! // Connect and authenticate
-//! let mut stream = client.connect_private(credentials).await?;
-//!
-//! // Subscribe to private feeds
-//! stream.subscribe_private(feeds::OPEN_ORDERS).await?;
-//! stream.subscribe_private(feeds::FILLS).await?;
-//! ```
+//! Supports automatic reconnection with subscription restoration.
+//! Private feeds use challenge-based authentication (see `sign_challenge`).
 
 mod client;
 mod messages;

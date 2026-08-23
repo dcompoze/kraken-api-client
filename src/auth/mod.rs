@@ -1,9 +1,4 @@
-//! Authentication module for Kraken API.
-//!
-//! This module provides:
-//! - Credential management with secure secret storage
-//! - Nonce generation for replay attack prevention
-//! - HMAC-SHA512 signature generation for authenticated requests
+//! Authentication for the Kraken API: credential management, nonce generation, and HMAC-SHA512 request signing.
 
 mod credentials;
 mod nonce;

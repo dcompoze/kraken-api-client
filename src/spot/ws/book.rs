@@ -113,17 +113,7 @@ impl BookData {
 ///
 /// Apply snapshots and updates from the `book` channel, then validate the
 /// book against the checksum from each update.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let mut book = OrderBookState::new("BTC/USD", 10, 1, 8);
-/// book.apply_snapshot(&snapshot_data);
-/// book.apply_update(&update_data);
-/// if !book.validate(update_data.checksum.unwrap()) {
-///     // Resubscribe to recover.
-/// }
-/// ```
+/// A failed validation means the book is out of sync and requires a resubscribe.
 #[derive(Debug, Clone)]
 pub struct OrderBookState {
     /// Symbol this book tracks.
@@ -334,7 +324,6 @@ mod tests {
         };
         book.apply_snapshot(&snapshot);
 
-        // Remove the best bid and add a new deep bid.
         let update = BookData {
             symbol: "BTC/USD".to_string(),
             bids: vec![level("29430.2", "0"), level("29420.0", "1.5")],
@@ -367,9 +356,7 @@ mod tests {
     fn test_hash_strips_point_and_leading_zeros() {
         assert_eq!(hashed_value("0.00011621", 8), crc32fast::hash(b"11621"));
         assert_eq!(hashed_value("29430.2", 1), crc32fast::hash(b"294302"));
-        // Trailing zeros are preserved by the fixed precision.
         assert_eq!(hashed_value("4.0", 8), crc32fast::hash(b"400000000"));
-        // An all-zero value hashes as a single zero digit.
         assert_eq!(hashed_value("0", 4), crc32fast::hash(b"0"));
     }
 }

@@ -1,5 +1,3 @@
-//! Integration tests for spot private trading, query, export, and subaccount endpoints.
-
 use std::str::FromStr;
 use std::sync::Arc;
 

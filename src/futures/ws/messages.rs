@@ -659,10 +659,6 @@ pub struct AccountLogEntry {
     pub realized_funding: Option<Decimal>,
 }
 
-
-// Tests
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

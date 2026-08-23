@@ -82,39 +82,22 @@ struct AuthState {
 
 /// A stream of messages from a Kraken Futures WebSocket connection.
 ///
-/// This stream handles:
-/// - Automatic reconnection with exponential backoff
-/// - Subscription restoration after reconnect
-/// - Challenge-based authentication for private feeds
-/// - Ping/pong connection health monitoring
+/// Handles reconnection with exponential backoff, subscription restoration, and challenge-based authentication.
 pub struct FuturesStream {
-    /// WebSocket sink for sending messages.
     sink: Option<Arc<Mutex<WsSink>>>,
-    /// WebSocket receiver for incoming messages.
     receiver: Option<WsReceiver>,
-    /// Connection configuration.
     config: WsConfig,
-    /// URL to connect to.
     url: String,
-    /// Credentials for private connections.
     credentials: Option<Arc<dyn CredentialsProvider>>,
-    /// Authentication state.
     auth_state: Option<AuthState>,
-    /// Active subscriptions.
     subscriptions: HashMap<String, Subscription>,
-    /// Ping interval timer.
     ping_interval: Interval,
-    /// Last message received timestamp.
     last_message: Instant,
-    /// Current reconnection attempt.
     reconnect_attempt: u32,
-    /// Connection state.
     connected: bool,
-    /// Whether we're currently reconnecting.
     reconnecting: bool,
-    /// Whether authentication is complete.
     authenticated: bool,
-    /// Pending authentication (waiting for challenge response).
+    /// Waiting for challenge response
     pending_auth: bool,
 }
 
@@ -185,18 +168,15 @@ impl FuturesStream {
             .as_ref()
             .ok_or(KrakenError::MissingCredentials)?;
 
-        // Clone the credentials to avoid borrow issues
+        // Clone the credentials to avoid borrow issues.
         let creds = credentials.get_credentials().clone();
 
-        // Send challenge request
         let challenge_req = ChallengeRequest::new(&creds.api_key);
         self.send_json(&challenge_req).await?;
         self.pending_auth = true;
 
-        // Wait for challenge response
         let challenge = self.wait_for_challenge().await?;
 
-        // Sign the challenge.
         let signed = sign_challenge(&creds, &challenge)?;
 
         self.auth_state = Some(AuthState {
@@ -254,11 +234,6 @@ impl FuturesStream {
     }
 
     /// Subscribe to a public feed.
-    ///
-    /// # Arguments
-    ///
-    /// * `feed` - Feed name (e.g., "ticker", "book", "trade")
-    /// * `product_ids` - Product IDs to subscribe to (e.g., ["PI_XBTUSD"])
     pub async fn subscribe_public(
         &mut self,
         feed: &str,
@@ -267,7 +242,6 @@ impl FuturesStream {
         let product_ids: Vec<String> = product_ids.into_iter().map(|s| s.to_string()).collect();
         let key = subscription_key(feed, &product_ids);
 
-        // Store subscription
         self.subscriptions.insert(
             key,
             Subscription {
@@ -277,7 +251,6 @@ impl FuturesStream {
             },
         );
 
-        // Send subscription request
         let request = SubscribeRequest::public(feed, product_ids);
         self.send_json(&request).await
     }
@@ -285,10 +258,6 @@ impl FuturesStream {
     /// Subscribe to a private feed.
     ///
     /// Requires prior authentication via `connect_private`.
-    ///
-    /// # Arguments
-    ///
-    /// * `feed` - Feed name (e.g., "open_orders", "fills", "open_positions")
     pub async fn subscribe_private(&mut self, feed: &str) -> Result<(), KrakenError> {
         let auth = self
             .auth_state
@@ -297,7 +266,6 @@ impl FuturesStream {
 
         let key = subscription_key(feed, &[]);
 
-        // Store subscription
         self.subscriptions.insert(
             key,
             Subscription {
@@ -307,7 +275,6 @@ impl FuturesStream {
             },
         );
 
-        // Send private subscription request
         let request = PrivateSubscribeRequest::new(
             feed,
             auth.challenge.clone(),
@@ -330,7 +297,6 @@ impl FuturesStream {
         let product_ids: Vec<String> = product_ids.into_iter().map(|s| s.to_string()).collect();
         let key = subscription_key(feed, &product_ids);
 
-        // Store subscription
         self.subscriptions.insert(
             key,
             Subscription {
@@ -340,7 +306,6 @@ impl FuturesStream {
             },
         );
 
-        // Send private subscription request
         let request = PrivateSubscribeRequest::new(
             feed,
             auth.challenge.clone(),
@@ -385,7 +350,7 @@ impl FuturesStream {
     fn should_reconnect(&self) -> bool {
         match self.config.max_reconnect_attempts {
             Some(max) => self.reconnect_attempt < max,
-            None => true, // Infinite retries
+            None => true,
         }
     }
 
@@ -407,15 +372,12 @@ impl FuturesStream {
         self.reconnecting = true;
         self.authenticated = false;
 
-        // Close existing connection
         self.sink = None;
         self.receiver = None;
 
-        // Wait with backoff
         let backoff = self.backoff_duration();
         tokio::time::sleep(backoff).await;
 
-        // Try to reconnect
         let (ws_stream, _) = connect_async(&self.url)
             .await
             .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e)))?;
@@ -428,12 +390,10 @@ impl FuturesStream {
         self.reconnect_attempt = 0;
         self.last_message = Instant::now();
 
-        // Re-authenticate if we have credentials
         if self.credentials.is_some() {
             self.authenticate().await?;
         }
 
-        // Restore subscriptions
         self.restore_subscriptions().await?;
 
         Ok(())
@@ -483,7 +443,6 @@ impl FuturesStream {
     fn parse_message(&mut self, text: &str) -> Option<FuturesWsEvent> {
         self.last_message = Instant::now();
 
-        // Try to parse as JSON
         let value: serde_json::Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
@@ -492,24 +451,20 @@ impl FuturesStream {
             }
         };
 
-        // Extract event/feed type first as owned strings
         let event = value
             .get("event")
             .and_then(|e| e.as_str())
             .map(String::from);
         let feed = value.get("feed").and_then(|f| f.as_str()).map(String::from);
 
-        // Check event type first
         if let Some(event) = event {
             return self.handle_event_message(&event, value);
         }
 
-        // Check feed type
         if let Some(feed) = feed {
             return self.handle_feed_message(&feed, value);
         }
 
-        // Unknown format
         Some(FuturesWsEvent::Raw(value))
     }
 
@@ -541,7 +496,7 @@ impl FuturesStream {
                 }
             }
             "challenge" => {
-                // Challenge handled during authentication, skip here
+                // Challenges are handled during authentication.
                 return None;
             }
             _ => {
@@ -637,14 +592,11 @@ impl Stream for FuturesStream {
     type Item = Result<FuturesWsEvent, KrakenError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Check ping interval (Kraken requires at least every 60 seconds)
         if self.ping_interval.poll_tick(cx).is_ready() && self.connected {
-            // The Futures WebSocket API doesn't use explicit ping messages like Spot v2
-            // Instead, connection health is maintained by the underlying WebSocket ping/pong
-            // which tokio-tungstenite handles automatically
+            // The Futures WebSocket API does not use explicit ping messages like Spot v2.
+            // Connection health relies on the protocol-level ping/pong that tokio-tungstenite handles automatically.
         }
 
-        // Poll the receiver for messages
         if let Some(receiver) = self.receiver.as_mut() {
             match Pin::new(receiver).poll_next(cx) {
                 Poll::Ready(Some(Ok(msg))) => {
@@ -654,7 +606,7 @@ impl Stream for FuturesStream {
                             if let Some(event) = this.parse_message(&text) {
                                 return Poll::Ready(Some(Ok(event)));
                             }
-                            // If parse returned None (e.g., challenge during auth), continue polling
+                            // A `None` from parsing (e.g. a challenge during auth) means keep polling.
                             cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
@@ -668,7 +620,7 @@ impl Stream for FuturesStream {
                             return Poll::Pending;
                         }
                         WsMessage::Ping(_) | WsMessage::Pong(_) => {
-                            // Handled automatically by tungstenite
+                            // Handled automatically by tungstenite.
                             cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
@@ -716,7 +668,6 @@ impl Stream for FuturesStream {
                 Poll::Pending => {}
             }
         } else if !self.reconnecting && self.should_reconnect() {
-            // Need to reconnect
             return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
                 attempt: self.reconnect_attempt + 1,
             })));
@@ -759,21 +710,17 @@ mod tests {
             ..Default::default()
         };
 
-        // Simulate backoff calculation
         let base = config.initial_backoff.as_millis() as u64;
         let max = config.max_backoff.as_millis() as u64;
 
-        // Attempt 0: 1 * 2^0 = 1
         let multiplier = 2u64.saturating_pow(0);
         let result = (base * multiplier).min(max);
         assert_eq!(Duration::from_millis(result), Duration::from_secs(1));
 
-        // Attempt 3: 1 * 2^3 = 8
         let multiplier = 2u64.saturating_pow(3);
         let result = (base * multiplier).min(max);
         assert_eq!(Duration::from_millis(result), Duration::from_secs(8));
 
-        // Attempt 10: capped at 60
         let multiplier = 2u64.saturating_pow(10);
         let result = (base * multiplier).min(max);
         assert_eq!(Duration::from_millis(result), Duration::from_secs(60));

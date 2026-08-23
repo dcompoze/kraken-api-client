@@ -128,57 +128,23 @@ enum SubscriptionStatus {
 
 /// A stream of messages from a Kraken WebSocket connection.
 ///
-/// This stream handles:
-/// - Automatic reconnection with exponential backoff
-/// - Subscription restoration after reconnect
-/// - Heartbeat/ping monitoring
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use kraken_api_client::spot::ws::SpotWsClient;
-/// use kraken_api_client::spot::ws::messages::{SubscribeParams, channels};
-/// use futures_util::StreamExt;
-///
-/// let client = SpotWsClient::new();
-/// let mut stream = client.connect_public().await?;
-///
-/// stream.subscribe(SubscribeParams::public(channels::TICKER, vec!["BTC/USD".into()])).await?;
-///
-/// while let Some(msg) = stream.next().await {
-///     match msg? {
-///         WsMessageEvent::ChannelData(data) => println!("Data: {:?}", data),
-///         WsMessageEvent::Disconnected => println!("Disconnected!"),
-///         _ => {}
-///     }
-/// }
-/// ```
+/// Handles reconnection with exponential backoff, subscription restoration after reconnect, and ping monitoring.
 pub struct KrakenStream {
-    /// WebSocket sink for sending messages.
     sink: Option<Arc<Mutex<WsSink>>>,
-    /// WebSocket receiver for incoming messages.
     receiver: Option<WsReceiver>,
-    /// Connection configuration.
     config: WsConfig,
-    /// URL to connect to.
     url: String,
-    /// Authentication token (for private connections).
+    /// Authentication token (for private connections)
     token: Option<String>,
-    /// Active subscriptions.
     subscriptions: HashMap<String, SubscriptionState>,
-    /// Ping interval timer.
     ping_interval: Interval,
-    /// Last ping sent timestamp.
+    /// Last ping sent timestamp
     last_ping: Option<Instant>,
-    /// Last message received timestamp.
+    /// Last message received timestamp
     last_message: Instant,
-    /// Current reconnection attempt.
     reconnect_attempt: u32,
-    /// Request ID counter.
     req_id: u64,
-    /// Connection state.
     connected: bool,
-    /// Whether we're currently reconnecting.
     reconnecting: bool,
 }
 
@@ -242,7 +208,6 @@ impl KrakenStream {
     pub async fn subscribe(&mut self, params: SubscribeParams) -> Result<(), KrakenError> {
         let key = subscription_key(&params);
 
-        // Store subscription state
         self.subscriptions.insert(
             key,
             SubscriptionState {
@@ -252,7 +217,6 @@ impl KrakenStream {
             },
         );
 
-        // Send subscription request
         self.send_subscribe(params).await
     }
 
@@ -283,31 +247,9 @@ impl KrakenStream {
         self.send_json(&req).await
     }
 
-    // ========== Trading Operations ==========
-
     /// Add a new order via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::spot::ws::SpotWsClient;
-    /// use kraken_api_client::spot::ws::messages::AddOrderParams;
-    /// use kraken_api_client::types::{OrderType, BuySell};
-    /// use rust_decimal_macros::dec;
-    ///
-    /// let client = SpotWsClient::new();
-    /// let token = rest_client.get_websocket_token().await?.token;
-    /// let mut stream = client.connect_private(&token).await?;
-    ///
-    /// let params = AddOrderParams::new(OrderType::Limit, BuySell::Buy, "BTC/USD", &token)
-    ///     .order_qty(dec!(0.001))
-    ///     .limit_price(dec!(50000))
-    ///     .validate(true); // Validate only, don't submit
-    ///
-    /// stream.add_order(params).await?;
-    /// ```
+    /// Requires an authenticated connection.
     pub async fn add_order(&mut self, params: AddOrderParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -318,27 +260,7 @@ impl KrakenStream {
 
     /// Cancel one or more orders via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::spot::ws::messages::CancelOrderParams;
-    ///
-    /// // Cancel by order ID
-    /// let params = CancelOrderParams::by_order_id(
-    ///     vec!["OQCLML-BW3P3-BUCMWZ".into()],
-    ///     &token
-    /// );
-    /// stream.cancel_order(params).await?;
-    ///
-    /// // Cancel by client order ID
-    /// let params = CancelOrderParams::by_cl_ord_id(
-    ///     vec!["my-order-1".into()],
-    ///     &token
-    /// );
-    /// stream.cancel_order(params).await?;
-    /// ```
+    /// Requires an authenticated connection.
     pub async fn cancel_order(&mut self, params: CancelOrderParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -349,16 +271,7 @@ impl KrakenStream {
 
     /// Cancel all open orders via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::spot::ws::messages::CancelAllParams;
-    ///
-    /// let params = CancelAllParams::new(&token);
-    /// stream.cancel_all_orders(params).await?;
-    /// ```
+    /// Requires an authenticated connection.
     pub async fn cancel_all_orders(&mut self, params: CancelAllParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -369,20 +282,7 @@ impl KrakenStream {
 
     /// Edit an existing order via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::spot::ws::messages::EditOrderParams;
-    /// use rust_decimal_macros::dec;
-    ///
-    /// let params = EditOrderParams::new("OQCLML-BW3P3-BUCMWZ", &token)
-    ///     .limit_price(dec!(51000))
-    ///     .order_qty(dec!(0.002));
-    ///
-    /// stream.edit_order(params).await?;
-    /// ```
+    /// Requires an authenticated connection.
     pub async fn edit_order(&mut self, params: EditOrderParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -394,19 +294,7 @@ impl KrakenStream {
     /// Amend an existing order via WebSocket.
     ///
     /// Amending keeps the order ID and queue priority, unlike editing.
-    /// This requires an authenticated connection. Use `connect_private()` first.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::spot::ws::messages::AmendOrderParams;
-    /// use rust_decimal_macros::dec;
-    ///
-    /// let params = AmendOrderParams::by_order_id("OQCLML-BW3P3-BUCMWZ", &token)
-    ///     .limit_price(dec!(51000));
-    ///
-    /// stream.amend_order(params).await?;
-    /// ```
+    /// Requires an authenticated connection.
     pub async fn amend_order(&mut self, params: AmendOrderParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -417,7 +305,7 @@ impl KrakenStream {
 
     /// Place multiple orders in a single batch via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
+    /// Requires an authenticated connection.
     pub async fn batch_add(&mut self, params: BatchAddParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -428,7 +316,7 @@ impl KrakenStream {
 
     /// Cancel multiple orders in a single batch via WebSocket.
     ///
-    /// This requires an authenticated connection. Use `connect_private()` first.
+    /// Requires an authenticated connection.
     pub async fn batch_cancel(&mut self, params: BatchCancelParams) -> Result<u64, KrakenError> {
         self.ensure_private()?;
         let req_id = self.next_req_id();
@@ -440,7 +328,7 @@ impl KrakenStream {
     /// Set a cancel-on-disconnect timer via WebSocket (dead man's switch).
     ///
     /// The timer must be refreshed before it expires, a timeout of 0 disables it.
-    /// This requires an authenticated connection. Use `connect_private()` first.
+    /// Requires an authenticated connection.
     pub async fn cancel_all_orders_after(
         &mut self,
         params: CancelAllOrdersAfterParams,
@@ -486,7 +374,7 @@ impl KrakenStream {
     fn should_reconnect(&self) -> bool {
         match self.config.max_reconnect_attempts {
             Some(max) => self.reconnect_attempt < max,
-            None => true, // Infinite retries
+            None => true,
         }
     }
 
@@ -507,15 +395,12 @@ impl KrakenStream {
         self.connected = false;
         self.reconnecting = true;
 
-        // Close existing connection
         self.sink = None;
         self.receiver = None;
 
-        // Wait with backoff
         let backoff = self.backoff_duration();
         tokio::time::sleep(backoff).await;
 
-        // Try to reconnect
         let (ws_stream, _) = connect_async(&self.url).await.map_err(|e| {
             KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e))
         })?;
@@ -528,7 +413,6 @@ impl KrakenStream {
         self.reconnect_attempt = 0;
         self.last_message = Instant::now();
 
-        // Restore subscriptions
         self.restore_subscriptions().await?;
 
         Ok(())
@@ -550,7 +434,6 @@ impl KrakenStream {
     fn parse_message(&mut self, text: &str) -> Option<WsMessageEvent> {
         self.last_message = Instant::now();
 
-        // Try to parse as JSON
         let value: serde_json::Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
@@ -559,18 +442,15 @@ impl KrakenStream {
             }
         };
 
-        // Check if it's a response message (has "method" at top level)
         if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
             return self.handle_response_message(method, &value);
         }
 
-        // Check if it's a channel message (has "channel" at top level)
         if let Some(channel) = value.get("channel").and_then(|c| c.as_str()) {
-            let channel = channel.to_string(); // Clone the channel string to avoid borrow
+            let channel = channel.to_string();
             return self.handle_channel_message(&channel, value);
         }
 
-        // Unknown message format
         tracing::debug!("Unknown message format: {}", text);
         Some(WsMessageEvent::ChannelData(value))
     }
@@ -630,12 +510,10 @@ impl KrakenStream {
                 }
             }
             "subscribe" => {
-                // Check for success/error
                 let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
                 if success {
                     if let Some(result) = value.get("result") {
                         if let Ok(sub_result) = serde_json::from_value::<SubscriptionResult>(result.clone()) {
-                            // Update subscription state
                             let key = subscription_key_from_result(&sub_result);
                             if let Some(state) = self.subscriptions.get_mut(&key) {
                                 state.status = SubscriptionStatus::Active;
@@ -744,7 +622,6 @@ impl KrakenStream {
                 ));
             }
             _ => {
-                // Unknown method, return as raw data
                 return Some(WsMessageEvent::ChannelData(value.clone()));
             }
         }
@@ -770,7 +647,6 @@ impl KrakenStream {
                 }
             }
             _ => {
-                // Market data or user data channel
                 return Some(WsMessageEvent::ChannelData(value));
             }
         }
@@ -780,7 +656,6 @@ impl KrakenStream {
 
     /// Check connection health (ping timeout).
     fn check_connection_health(&self) -> bool {
-        // Check if ping response is overdue
         if let Some(ping_time) = self.last_ping {
             if ping_time.elapsed() > self.config.pong_timeout {
                 return false;
@@ -811,9 +686,8 @@ impl Stream for KrakenStream {
     type Item = Result<WsMessageEvent, KrakenError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Check ping interval
         if self.ping_interval.poll_tick(cx).is_ready() && self.connected {
-            // Only send ping if not waiting for pong
+            // Do not send a new ping while a pong is still outstanding.
             if self.last_ping.is_none() {
                 let this = self.as_mut().get_mut();
                 let ping_req = WsRequest::new("ping", PingRequest::with_req_id(this.next_req_id()));
@@ -831,7 +705,6 @@ impl Stream for KrakenStream {
             }
         }
 
-        // Check connection health
         if !self.check_connection_health() && self.connected {
             let this = self.as_mut().get_mut();
             this.connected = false;
@@ -845,7 +718,6 @@ impl Stream for KrakenStream {
             }
         }
 
-        // Poll the receiver for messages
         if let Some(receiver) = self.receiver.as_mut() {
             match Pin::new(receiver).poll_next(cx) {
                 Poll::Ready(Some(Ok(msg))) => {
@@ -855,12 +727,10 @@ impl Stream for KrakenStream {
                             if let Some(event) = this.parse_message(&text) {
                                 return Poll::Ready(Some(Ok(event)));
                             }
-                            // If parse returned None, continue polling
                             cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
                         WsMessage::Binary(data) => {
-                            // Try to parse binary as JSON text
                             if let Ok(text) = String::from_utf8(data.to_vec()) {
                                 if let Some(event) = this.parse_message(&text) {
                                     return Poll::Ready(Some(Ok(event)));
@@ -870,7 +740,7 @@ impl Stream for KrakenStream {
                             return Poll::Pending;
                         }
                         WsMessage::Ping(_) | WsMessage::Pong(_) => {
-                            // Handled automatically by tungstenite
+                            // Protocol-level ping/pong is handled by tungstenite.
                             cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
@@ -918,7 +788,6 @@ impl Stream for KrakenStream {
                 Poll::Pending => {}
             }
         } else if !self.reconnecting && self.should_reconnect() {
-            // Need to reconnect
             return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
                 attempt: self.reconnect_attempt + 1,
             })));
@@ -960,23 +829,19 @@ mod tests {
 
     #[test]
     fn test_backoff_calculation_formula() {
-        // Test backoff formula: base * 2^attempt, capped at max
         let initial = Duration::from_secs(1);
         let max = Duration::from_secs(60);
 
-        // Attempt 0: 1 * 2^0 = 1
         let attempt = 0;
         let multiplier = 2u64.saturating_pow(attempt);
         let result = (initial.as_millis() as u64 * multiplier).min(max.as_millis() as u64);
         assert_eq!(Duration::from_millis(result), Duration::from_secs(1));
 
-        // Attempt 3: 1 * 2^3 = 8
         let attempt = 3;
         let multiplier = 2u64.saturating_pow(attempt);
         let result = (initial.as_millis() as u64 * multiplier).min(max.as_millis() as u64);
         assert_eq!(Duration::from_millis(result), Duration::from_secs(8));
 
-        // Attempt 10: 1 * 2^10 = 1024 -> capped at 60
         let attempt = 10;
         let multiplier = 2u64.saturating_pow(attempt);
         let result = (initial.as_millis() as u64 * multiplier).min(max.as_millis() as u64);

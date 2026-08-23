@@ -1,7 +1,4 @@
-//! Futures-specific domain types.
-//!
-//! This module contains types specific to Futures trading that differ from
-//! or extend the Spot API types.
+//! Futures-specific domain types that differ from or extend the Spot API types.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -628,12 +625,10 @@ mod tests {
 
     #[test]
     fn test_order_type_serde() {
-        // Test alias
         assert_eq!(
             serde_json::from_str::<FuturesOrderType>(r#""lmt""#).unwrap(),
             FuturesOrderType::Limit
         );
-        // Test snake_case
         assert_eq!(
             serde_json::from_str::<FuturesOrderType>(r#""take_profit""#).unwrap(),
             FuturesOrderType::TakeProfit

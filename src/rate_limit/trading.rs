@@ -1,8 +1,6 @@
 //! Trading-specific rate limiting with order lifetime penalties.
 //!
-//! Kraken applies different rate limit penalties for order cancellation
-//! based on how long the order has been open. Orders cancelled quickly
-//! incur higher penalties.
+//! Kraken penalizes order cancellation based on how long the order has been open.
 //!
 //! # Penalty Schedule
 //!
@@ -57,10 +55,7 @@ impl OrderTrackingInfo {
     }
 }
 
-/// Trading rate limiter with order lifetime penalty tracking.
-///
-/// Tracks orders and calculates appropriate rate limit penalties
-/// when they are cancelled based on their age.
+/// Trading rate limiter that tracks orders and applies age-based cancellation penalties.
 #[derive(Debug)]
 pub struct TradingRateLimiter {
     /// Order tracking cache (orders expire after 5 minutes)
@@ -77,14 +72,9 @@ pub struct TradingRateLimiter {
 
 impl TradingRateLimiter {
     /// Create a new trading rate limiter.
-    ///
-    /// # Arguments
-    ///
-    /// * `max_counter` - Maximum counter value
-    /// * `decay_rate_per_sec` - How much the counter decays per second
     pub fn new(max_counter: u32, decay_rate_per_sec: f64) -> Self {
         Self {
-            orders: TtlCache::new(Duration::from_secs(300)), // 5 minute TTL
+            orders: TtlCache::new(Duration::from_secs(300)),
             counter: 0,
             max_counter: (max_counter as i64) * 100,
             decay_rate: (decay_rate_per_sec * 100.0) as i64,
@@ -107,7 +97,7 @@ impl TradingRateLimiter {
     pub fn try_place_order(&mut self, order_id: &str, info: OrderTrackingInfo) -> Result<(), Duration> {
         self.update_counter();
 
-        // Adding an order costs 1 point (100 in scaled units)
+        // Adding an order costs 1 point (100 in scaled units).
         let cost = 100;
 
         if self.counter + cost <= self.max_counter {
@@ -115,7 +105,6 @@ impl TradingRateLimiter {
             self.orders.insert(order_id.to_string(), info);
             Ok(())
         } else {
-            // Calculate wait time
             let excess = self.counter + cost - self.max_counter;
             let wait_secs = excess as f64 / self.decay_rate as f64;
             Err(Duration::from_secs_f64(wait_secs))
@@ -157,12 +146,11 @@ impl TradingRateLimiter {
     pub fn try_cancel_order(&mut self, order_id: &str) -> Result<u32, Duration> {
         self.update_counter();
 
-        // Get the order age and calculate penalty
         let key = order_id.to_string();
         let penalty = if let Some(age) = self.orders.get_age(&key) {
             Self::cancel_penalty(age)
         } else {
-            // Order not tracked, assume worst case
+            // Order not tracked, assume the worst case.
             trading::CANCEL_PENALTY_UNDER_5S
         };
 
@@ -176,7 +164,6 @@ impl TradingRateLimiter {
             self.orders.remove(&key);
             Ok(penalty)
         } else {
-            // Calculate wait time
             let excess = self.counter + cost - self.max_counter;
             let wait_secs = excess as f64 / self.decay_rate as f64;
             Err(Duration::from_secs_f64(wait_secs))
@@ -230,7 +217,7 @@ impl TradingRateLimiter {
 
 impl Default for TradingRateLimiter {
     fn default() -> Self {
-        // Default: Pro tier limits
+        // Pro tier limits.
         Self::new(20, 1.0)
     }
 }
@@ -306,17 +293,15 @@ mod tests {
         let info = OrderTrackingInfo::new("BTC/USD");
         limiter.try_place_order("order1", info).ok();
 
-        // Cancel immediately (should get max penalty)
         let result = limiter.try_cancel_order("order1");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 8); // Under 5s penalty
+        assert_eq!(result.unwrap(), 8);
     }
 
     #[test]
     fn test_decay_over_time() {
-        let mut limiter = TradingRateLimiter::new(20, 10.0); // High decay rate for testing
+        let mut limiter = TradingRateLimiter::new(20, 10.0);
 
-        // Fill up the counter
         for i in 0..20 {
             let info = OrderTrackingInfo::new("BTC/USD");
             limiter.try_place_order(&format!("order{}", i), info).ok();

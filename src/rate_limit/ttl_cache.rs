@@ -1,36 +1,10 @@
-//! Time-to-live cache for tracking order lifetimes.
-//!
-//! This cache automatically expires entries after a configurable duration.
-//! It's used for tracking order creation times to calculate rate limit penalties
-//! when orders are cancelled.
-//!
-//! # Example
-//!
-//! ```rust
-//! use std::time::Duration;
-//! use kraken_api_client::rate_limit::TtlCache;
-//!
-//! let mut cache: TtlCache<String, i64> = TtlCache::new(Duration::from_secs(300));
-//!
-//! // Insert an order
-//! cache.insert("O123".to_string(), 1234567890);
-//!
-//! // Check if it exists
-//! assert!(cache.get(&"O123".to_string()).is_some());
-//!
-//! // Remove an order
-//! cache.remove(&"O123".to_string());
-//! assert!(cache.get(&"O123".to_string()).is_none());
-//! ```
+//! Time-to-live cache used for tracking order creation times to calculate cancellation penalties.
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
 /// A cache that automatically expires entries after a configurable TTL.
-///
-/// This is useful for tracking order lifetimes in rate limiting, where
-/// orders cancelled within certain time windows incur different penalties.
 #[derive(Debug)]
 pub struct TtlCache<K, V> {
     cache: HashMap<K, (V, Instant)>,
@@ -42,8 +16,6 @@ where
     K: Hash + Eq,
 {
     /// Create a new TTL cache with the specified time-to-live duration.
-    ///
-    /// Entries will be considered expired after this duration.
     pub fn new(ttl: Duration) -> Self {
         Self {
             cache: HashMap::new(),
@@ -59,9 +31,7 @@ where
         }
     }
 
-    /// Insert a key-value pair into the cache.
-    ///
-    /// The entry will be timestamped with the current time.
+    /// Insert a key-value pair, timestamped with the current time.
     pub fn insert(&mut self, key: K, value: V) {
         self.cache.insert(key, (value, Instant::now()));
     }
@@ -89,9 +59,7 @@ where
         })
     }
 
-    /// Get the timestamp when the entry was inserted.
-    ///
-    /// Returns `None` if the key doesn't exist or has expired.
+    /// Get the timestamp when the entry was inserted, or `None` if missing or expired.
     pub fn get_timestamp(&self, key: &K) -> Option<Instant> {
         self.cache.get(key).and_then(|(_, timestamp)| {
             if timestamp.elapsed() < self.ttl {
@@ -102,9 +70,7 @@ where
         })
     }
 
-    /// Get the age of an entry in the cache.
-    ///
-    /// Returns `None` if the key doesn't exist or has expired.
+    /// Get the age of an entry, or `None` if missing or expired.
     pub fn get_age(&self, key: &K) -> Option<Duration> {
         self.cache.get(key).and_then(|(_, timestamp)| {
             let age = timestamp.elapsed();
@@ -116,9 +82,7 @@ where
         })
     }
 
-    /// Remove an entry from the cache.
-    ///
-    /// Returns the value if it existed and hadn't expired, `None` otherwise.
+    /// Remove an entry, returning the value if it existed and had not expired.
     pub fn remove(&mut self, key: &K) -> Option<V> {
         self.cache.remove(key).and_then(|(value, timestamp)| {
             if timestamp.elapsed() < self.ttl {
@@ -130,8 +94,6 @@ where
     }
 
     /// Remove an entry and return both the value and its age.
-    ///
-    /// Useful for calculating rate limit penalties based on order age.
     pub fn remove_with_age(&mut self, key: &K) -> Option<(V, Duration)> {
         self.cache.remove(key).and_then(|(value, timestamp)| {
             let age = timestamp.elapsed();
@@ -149,8 +111,6 @@ where
     }
 
     /// Remove all expired entries from the cache.
-    ///
-    /// Call this periodically to free memory from expired entries.
     pub fn cleanup(&mut self) {
         let ttl = self.ttl;
         self.cache.retain(|_, (_, timestamp)| timestamp.elapsed() < ttl);
@@ -185,9 +145,7 @@ where
         self.ttl
     }
 
-    /// Set a new TTL duration.
-    ///
-    /// This affects all future checks but doesn't modify existing timestamps.
+    /// Set a new TTL duration, affecting all future checks without modifying existing timestamps.
     pub fn set_ttl(&mut self, ttl: Duration) {
         self.ttl = ttl;
     }
@@ -198,7 +156,7 @@ where
     K: Hash + Eq,
 {
     fn default() -> Self {
-        // Default TTL of 5 minutes (300 seconds) as per Kraken's order penalty window
+        // 5 minute TTL matching Kraken's order penalty window.
         Self::new(Duration::from_secs(300))
     }
 }
@@ -233,7 +191,6 @@ mod tests {
         cache.insert("key1".to_string(), 100);
         assert!(cache.get(&"key1".to_string()).is_some());
 
-        // Wait for expiration
         thread::sleep(Duration::from_millis(60));
         assert!(cache.get(&"key1".to_string()).is_none());
     }
@@ -246,13 +203,10 @@ mod tests {
         cache.insert("key2".to_string(), 200);
         assert_eq!(cache.len(), 2);
 
-        // Wait for expiration
         thread::sleep(Duration::from_millis(60));
 
-        // Entry still in HashMap but expired
         assert_eq!(cache.len(), 2);
 
-        // Cleanup removes expired entries
         cache.cleanup();
         assert_eq!(cache.len(), 0);
     }

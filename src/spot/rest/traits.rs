@@ -1,22 +1,4 @@
 //! Trait definition for the Kraken REST API client.
-//!
-//! This module provides the `KrakenClient` trait which abstracts all REST API operations.
-//! This enables:
-//! - Mock implementations for testing
-//! - Decorator pattern (e.g., rate limiting wrapper)
-//! - Alternative implementations
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use kraken_api_client::spot::rest::{KrakenClient, SpotRestClient};
-//!
-//! async fn check_balance<C: KrakenClient>(client: &C) -> Result<(), kraken_api_client::KrakenError> {
-//!     let time = client.get_server_time().await?;
-//!     println!("Server time: {}", time.unixtime);
-//!     Ok(())
-//! }
-//! ```
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -51,12 +33,7 @@ use crate::spot::rest::public::{
 
 /// Trait defining all Kraken REST API operations.
 ///
-/// This trait enables dependency injection and allows for:
-/// - Testing with mock implementations
-/// - Wrapping with decorators (e.g., rate limiting)
-/// - Alternative implementations
-///
-/// All methods are async and return `Result<T, KrakenError>`.
+/// Enables mock implementations and decorators such as a rate limiting wrapper.
 pub trait KrakenClient: Send + Sync {
     // Public Endpoints.
 
@@ -383,9 +360,7 @@ pub trait KrakenClient: Send + Sync {
     ) -> impl Future<Output = Result<WebSocketToken, KrakenError>> + Send;
 }
 
-/// Extension trait for boxed trait objects.
-///
-/// This allows using `KrakenClient` as a trait object via `Box<dyn KrakenClientExt>`.
+/// Object-safe version of [`KrakenClient`] for use as `Box<dyn KrakenClientExt>`.
 #[allow(async_fn_in_trait)]
 pub trait KrakenClientExt: Send + Sync {
     // Public Endpoints.
@@ -587,7 +562,6 @@ pub trait KrakenClientExt: Send + Sync {
     async fn get_websocket_token(&self) -> Result<WebSocketToken, KrakenError>;
 }
 
-// Blanket implementation for types that implement KrakenClient
 impl<T: KrakenClient> KrakenClientExt for T {
     async fn get_server_time(&self) -> Result<ServerTime, KrakenError> {
         KrakenClient::get_server_time(self).await

@@ -30,10 +30,8 @@ pub mod rate_limit;
 pub mod spot;
 pub mod types;
 
-// Kraken Futures API support
 pub mod futures;
 
-// Re-export commonly used types at crate root
 pub use error::KrakenError;
 pub use types::common::{BuySell, OrderStatus, OrderType};
 

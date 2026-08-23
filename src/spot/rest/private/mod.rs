@@ -1,4 +1,4 @@
-//! Private REST API endpoints (authentication required).
+//! Private REST API endpoints.
 //!
 //! These endpoints require API credentials to be configured on the client.
 
@@ -11,29 +11,7 @@ use crate::spot::rest::SpotRestClient;
 use crate::spot::rest::endpoints::private;
 
 impl SpotRestClient {
-    /// Get account balance.
-    ///
-    /// Returns the balances of all assets in the account.
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use kraken_api_client::spot::rest::SpotRestClient;
-    /// use kraken_api_client::auth::StaticCredentials;
-    /// use std::sync::Arc;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let credentials = Arc::new(StaticCredentials::new("key", "secret"));
-    ///     let client = SpotRestClient::builder().credentials(credentials).build();
-    ///
-    ///     let balances = client.get_account_balance().await?;
-    ///     for (asset, balance) in balances {
-    ///         println!("{}: {}", asset, balance);
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
+    /// Get the balances of all assets in the account.
     pub async fn get_account_balance(
         &self,
     ) -> Result<std::collections::HashMap<String, rust_decimal::Decimal>, KrakenError> {
@@ -49,9 +27,7 @@ impl SpotRestClient {
         self.private_post(private::BALANCE_EX, &Empty {}).await
     }
 
-    /// Get trade balance.
-    ///
-    /// Returns margin account details including equity, margin, and P&L.
+    /// Get trade balance (margin account details).
     pub async fn get_trade_balance(
         &self,
         request: Option<&TradeBalanceRequest>,
@@ -418,36 +394,6 @@ impl SpotRestClient {
     }
 
     /// Add a new order.
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use kraken_api_client::spot::rest::{SpotRestClient, private::AddOrderRequest};
-    /// use kraken_api_client::{BuySell, OrderType};
-    /// use kraken_api_client::auth::StaticCredentials;
-    /// use rust_decimal::Decimal;
-    /// use std::str::FromStr;
-    /// use std::sync::Arc;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let credentials = Arc::new(StaticCredentials::new("key", "secret"));
-    ///     let client = SpotRestClient::builder().credentials(credentials).build();
-    ///
-    ///     let request = AddOrderRequest::new(
-    ///         "XBTUSD",
-    ///         BuySell::Buy,
-    ///         OrderType::Limit,
-    ///         Decimal::from_str("0.001")?,
-    ///     )
-    ///     .price(Decimal::from_str("50000")?)
-    ///     .validate(true); // Validate only, don't actually place
-    ///
-    ///     let result = client.add_order(&request).await?;
-    ///     println!("Order result: {:?}", result);
-    ///     Ok(())
-    /// }
-    /// ```
     pub async fn add_order(
         &self,
         request: &AddOrderRequest,

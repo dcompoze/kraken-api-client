@@ -1,49 +1,7 @@
-//! Rate limiting for Kraken API.
+//! Rate limiting for the Kraken API.
 //!
-//! Kraken has strict rate limits that vary by endpoint type and verification tier.
-//! This module provides automatic rate limiting to prevent API bans.
-//!
-//! ## Rate Limit Categories
-//!
-//! - **Public endpoints**: Limited by IP address (sliding window)
-//! - **Private endpoints**: Limited by API key, varies by verification tier (token bucket)
-//! - **Trading endpoints**: Additional penalties for order placement/cancellation
-//!
-//! ## Example
-//!
-//! ```rust,ignore
-//! use kraken_api_client::spot::rest::SpotRestClient;
-//! use kraken_api_client::rate_limit::{RateLimitedClient, RateLimitConfig};
-//! use kraken_api_client::types::VerificationTier;
-//!
-//! // Wrap a client with automatic rate limiting
-//! let client = SpotRestClient::new();
-//! let rate_limited = RateLimitedClient::new(client, RateLimitConfig {
-//!     tier: VerificationTier::Intermediate,
-//!     enabled: true,
-//! });
-//!
-//! // All requests are automatically rate limited
-//! let time = rate_limited.get_server_time().await?;
-//! ```
-//!
-//! ## Low-Level Rate Limiters
-//!
-//! You can also use the rate limiters directly for custom logic:
-//!
-//! ```rust
-//! use kraken_api_client::rate_limit::{TtlCache, KeyedRateLimiter, TradingRateLimiter};
-//! use std::time::Duration;
-//!
-//! // Track orders for rate limit penalty calculation
-//! let mut order_cache: TtlCache<String, i64> = TtlCache::new(Duration::from_secs(300));
-//!
-//! // Per-pair rate limiting for order book requests
-//! let mut pair_limiter: KeyedRateLimiter<String> = KeyedRateLimiter::new(Duration::from_secs(1), 5);
-//!
-//! // Trading rate limiter with order lifetime penalties
-//! let mut trading_limiter = TradingRateLimiter::new(20, 1.0);
-//! ```
+//! Kraken limits public endpoints by IP address (sliding window), private endpoints by API key and verification tier (token bucket), and applies extra penalties for order placement and cancellation.
+//! [`RateLimitedClient`] wraps a client with automatic rate limiting, and the individual limiters can be used directly for custom logic.
 
 mod client;
 mod keyed;

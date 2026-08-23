@@ -1,22 +1,4 @@
-//! Per-key rate limiting.
-//!
-//! This module provides rate limiting that can be applied on a per-key basis,
-//! such as per trading pair for order book requests.
-//!
-//! # Example
-//!
-//! ```rust
-//! use std::time::Duration;
-//! use kraken_api_client::rate_limit::KeyedRateLimiter;
-//!
-//! let mut limiter = KeyedRateLimiter::new(
-//!     Duration::from_secs(1),  // Window size
-//!     5,                        // Max requests per window
-//! );
-//!
-//! // Check if we can make a request for a specific key
-//! assert!(limiter.try_acquire("BTC/USD").is_ok());
-//! ```
+//! Per-key rate limiting, such as per trading pair for order book requests.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -24,8 +6,7 @@ use std::time::{Duration, Instant};
 
 /// Per-key rate limiter using a sliding window algorithm.
 ///
-/// Each key (e.g., trading pair) has its own rate limit tracking.
-/// Useful for endpoints like order book that have per-pair limits.
+/// Each key (e.g. trading pair) has its own rate limit tracking.
 #[derive(Debug)]
 pub struct KeyedRateLimiter<K> {
     /// Rate limits per key
@@ -41,11 +22,6 @@ where
     K: Hash + Eq + Clone,
 {
     /// Create a new per-key rate limiter.
-    ///
-    /// # Arguments
-    ///
-    /// * `window` - The sliding window duration
-    /// * `max_requests` - Maximum number of requests allowed per window
     pub fn new(window: Duration, max_requests: u32) -> Self {
         Self {
             limiters: HashMap::new(),
@@ -56,8 +32,7 @@ where
 
     /// Try to acquire a permit for the given key.
     ///
-    /// Returns `Ok(())` if the request is allowed, or `Err(wait_time)` if
-    /// the rate limit has been exceeded and you need to wait.
+    /// Returns `Ok(())` if allowed, `Err(wait_time)` if rate limited.
     pub fn try_acquire(&mut self, key: K) -> Result<(), Duration> {
         let limiter = self
             .limiters
@@ -93,9 +68,7 @@ where
         self.limiters.remove(key);
     }
 
-    /// Clean up limiters that haven't been used recently.
-    ///
-    /// Removes limiters where all requests have expired from the window.
+    /// Remove limiters where all requests have expired from the window.
     pub fn cleanup(&mut self) {
         self.limiters.retain(|_, limiter| !limiter.is_empty());
     }
@@ -116,15 +89,11 @@ where
     K: Hash + Eq + Clone,
 {
     fn default() -> Self {
-        // Default: 1 request per second per key
         Self::new(Duration::from_secs(1), 1)
     }
 }
 
-/// A sliding window rate limiter.
-///
-/// Tracks request timestamps within a sliding window and enforces a maximum
-/// number of requests within that window.
+/// A sliding window rate limiter that enforces a maximum number of requests within the window.
 #[derive(Debug)]
 pub struct SlidingWindow {
     /// Request timestamps
@@ -155,7 +124,6 @@ impl SlidingWindow {
             self.requests.push(Instant::now());
             Ok(())
         } else {
-            // Find when the oldest request will expire.
             let wait_time = self
                 .requests
                 .first()
@@ -200,7 +168,6 @@ impl SlidingWindow {
         if (count as u32) < self.max_requests {
             None
         } else {
-            // Find the oldest request still in the window
             self.requests
                 .iter()
                 .find(|ts| ts.elapsed() < self.window)
@@ -219,7 +186,6 @@ impl SlidingWindow {
         self.requests.retain(|ts| ts.elapsed() < window);
     }
 
-    /// Internal cleanup check (immutable).
     fn cleanup_check(&self) -> usize {
         self.requests
             .iter()
@@ -272,12 +238,10 @@ mod tests {
         let mut limiter: KeyedRateLimiter<String> =
             KeyedRateLimiter::new(Duration::from_secs(1), 2);
 
-        // Different keys have independent limits
         assert!(limiter.try_acquire("BTC/USD".to_string()).is_ok());
         assert!(limiter.try_acquire("BTC/USD".to_string()).is_ok());
         assert!(limiter.try_acquire("BTC/USD".to_string()).is_err());
 
-        // ETH/USD has its own limit
         assert!(limiter.try_acquire("ETH/USD".to_string()).is_ok());
         assert!(limiter.try_acquire("ETH/USD".to_string()).is_ok());
         assert!(limiter.try_acquire("ETH/USD".to_string()).is_err());

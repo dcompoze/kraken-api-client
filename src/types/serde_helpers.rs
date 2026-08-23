@@ -1,7 +1,4 @@
-//! Custom serde helpers for Kraken's quirky serialization formats.
-//!
-//! Kraken's API uses various non-standard serialization formats that require
-//! custom helpers. These modules provide reusable serde helpers.
+//! Custom serde helpers for Kraken's non-standard serialization formats.
 
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
@@ -10,27 +7,6 @@ use std::str::FromStr;
 use serde::{de, Deserialize, Deserializer, Serializer};
 
 /// Serialize/deserialize a `BTreeSet<T>` as a comma-separated string.
-///
-/// # Example
-///
-/// ```rust
-/// use std::collections::BTreeSet;
-/// use serde::{Serialize, Deserialize};
-/// use kraken_api_client::types::serde_helpers::comma_separated;
-///
-/// #[derive(Serialize, Deserialize, Debug, PartialEq)]
-/// struct Request {
-///     #[serde(with = "comma_separated")]
-///     flags: BTreeSet<String>,
-/// }
-///
-/// let request = Request {
-///     flags: ["post", "nompp"].iter().map(|s| s.to_string()).collect(),
-/// };
-///
-/// let json = serde_json::to_string(&request).unwrap();
-/// assert_eq!(json, r#"{"flags":"nompp,post"}"#); // BTreeSet sorts alphabetically
-/// ```
 pub mod comma_separated {
     use super::*;
 
@@ -67,24 +43,7 @@ pub mod comma_separated {
 
 /// Serialize/deserialize a type using its Display/FromStr implementations.
 ///
-/// This is useful for types that Kraken wants as strings (e.g., booleans as "true"/"false").
-///
-/// # Example
-///
-/// ```rust
-/// use serde::{Serialize, Deserialize};
-/// use kraken_api_client::types::serde_helpers::display_fromstr;
-///
-/// #[derive(Serialize, Deserialize, Debug)]
-/// struct Request {
-///     #[serde(with = "display_fromstr")]
-///     validate: bool, // Serializes as "true"/"false" string
-/// }
-///
-/// let request = Request { validate: true };
-/// let json = serde_json::to_string(&request).unwrap();
-/// assert_eq!(json, r#"{"validate":"true"}"#);
-/// ```
+/// Useful for values that Kraken wants as strings, e.g. booleans as "true"/"false".
 pub mod display_fromstr {
     use super::*;
 
@@ -111,26 +70,7 @@ pub mod display_fromstr {
 
 /// Deserialize to `None` instead of failing on invalid/unexpected data.
 ///
-/// This is useful for fields that Kraken sometimes returns with unexpected types or formats.
-///
-/// # Example
-///
-/// ```rust
-/// use serde::Deserialize;
-/// use rust_decimal::Decimal;
-/// use kraken_api_client::types::serde_helpers::default_on_error;
-///
-/// #[derive(Deserialize, Debug)]
-/// struct Response {
-///     #[serde(deserialize_with = "default_on_error::deserialize", default)]
-///     leverage: Option<Decimal>,
-/// }
-///
-/// // Even with invalid data, deserialization succeeds with None
-/// let json = r#"{"leverage":"invalid"}"#;
-/// let response: Response = serde_json::from_str(json).unwrap();
-/// assert!(response.leverage.is_none());
-/// ```
+/// Useful for fields that Kraken sometimes returns with unexpected types or formats.
 pub mod default_on_error {
     use super::*;
 
@@ -147,30 +87,6 @@ pub mod default_on_error {
 /// Helper for deserializing Kraken's deposit/withdrawal limit field.
 ///
 /// Kraken returns either `"limit": false` or `"limit": "100.0"`.
-///
-/// # Example
-///
-/// ```rust
-/// use serde::Deserialize;
-/// use rust_decimal::Decimal;
-/// use kraken_api_client::types::serde_helpers::maybe_decimal;
-///
-/// #[derive(Deserialize, Debug)]
-/// struct DepositMethod {
-///     #[serde(deserialize_with = "maybe_decimal::deserialize", default)]
-///     limit: Option<Decimal>,
-/// }
-///
-/// // With false
-/// let json = r#"{"limit":false}"#;
-/// let method: DepositMethod = serde_json::from_str(json).unwrap();
-/// assert!(method.limit.is_none());
-///
-/// // With string decimal
-/// let json = r#"{"limit":"100.0"}"#;
-/// let method: DepositMethod = serde_json::from_str(json).unwrap();
-/// assert_eq!(method.limit.unwrap().to_string(), "100.0");
-/// ```
 pub mod maybe_decimal {
     use super::*;
     use rust_decimal::Decimal;
@@ -236,27 +152,6 @@ pub mod maybe_decimal {
 /// Helper for empty strings that should be deserialized as None.
 ///
 /// Some Kraken fields return `""` instead of null.
-///
-/// # Example
-///
-/// ```rust
-/// use serde::Deserialize;
-/// use kraken_api_client::types::serde_helpers::empty_string_as_none;
-///
-/// #[derive(Deserialize, Debug)]
-/// struct Response {
-///     #[serde(deserialize_with = "empty_string_as_none::deserialize", default)]
-///     refid: Option<String>,
-/// }
-///
-/// let json = r#"{"refid":""}"#;
-/// let response: Response = serde_json::from_str(json).unwrap();
-/// assert!(response.refid.is_none());
-///
-/// let json = r#"{"refid":"ABC123"}"#;
-/// let response: Response = serde_json::from_str(json).unwrap();
-/// assert_eq!(response.refid.unwrap(), "ABC123");
-/// ```
 pub mod empty_string_as_none {
     use super::*;
 
@@ -270,9 +165,7 @@ pub mod empty_string_as_none {
     }
 }
 
-/// Optional comma-separated helper for Option<BTreeSet<T>>.
-///
-/// Uses with comma_separated but handles the Option wrapper.
+/// Variant of `comma_separated` for `Option<BTreeSet<T>>`.
 pub mod optional_comma_separated {
     use super::*;
 

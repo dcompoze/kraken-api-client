@@ -77,6 +77,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## API coverage
+
+| API | Supported | Endpoints |
+|---|---|---|
+| Spot REST (public) | ✓ | Time, SystemStatus, Assets, AssetPairs, Ticker, OHLC, Depth, Trades, Spread |
+| Spot REST (account) | ✓ | Balance, BalanceEx, TradeBalance, OpenOrders, ClosedOrders, QueryOrders, OrderAmends, TradesHistory, QueryTrades, OpenPositions, Ledgers, QueryLedgers, TradeVolume, exports |
+| Spot REST (trading) | ✓ | AddOrder, AddOrderBatch, AmendOrder, EditOrder, CancelOrder, CancelAll, CancelAllOrdersAfter, CancelOrderBatch |
+| Spot REST (funding) | ✓ | Deposit and withdrawal methods, addresses, statuses, Withdraw, WithdrawCancel, WalletTransfer |
+| Spot REST (sub-accounts) | ✓ | CreateSubaccount, AccountTransfer |
+| Spot REST (earn) | ✓ | Allocate, Deallocate, allocation and deallocation status, Strategies, Allocations |
+| Spot WebSocket v2 (market data) | ✓ | ticker, book, level3, trade, ohlc, instrument channels |
+| Spot WebSocket v2 (user data) | ✓ | executions, balances channels (via GetWebSocketsToken) |
+| Spot WebSocket v2 (trading) | ✓ | add_order, cancel_order, cancel_all, edit_order, amend_order, batch_add, batch_cancel, cancel_all_orders_after |
+| Futures REST (public) | ✓ | tickers, orderbook, history, instruments, fee schedules, historical funding rates, charts |
+| Futures REST (private) | ✓ | accounts, open positions, open orders, fills, send/edit/cancel order, batch orders, transfers, withdrawal, account log, notifications, leverage and PnL preferences, unwind queue |
+| Futures WebSocket | ✓ | Public and private feed subscriptions with challenge authentication |
+
 ## Credentials
 
 Private endpoints use credentials from your own source.

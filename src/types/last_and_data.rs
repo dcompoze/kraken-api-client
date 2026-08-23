@@ -18,27 +18,7 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, Visitor};
 
 /// A response containing paginated data with a "last" cursor.
 ///
-/// This type handles Kraken's pagination format where the response contains:
-/// - A dynamically-named field with the actual data (e.g., "XBTUSD")
-/// - A "last" field containing a cursor for the next request
-///
-/// # Example
-///
-/// ```rust
-/// use kraken_api_client::types::LastAndData;
-///
-/// #[derive(Debug, serde::Deserialize)]
-/// struct Trade {
-///     price: String,
-///     volume: String,
-/// }
-///
-/// let json = r#"{"XBTUSD": [{"price": "50000", "volume": "1.0"}], "last": "12345"}"#;
-/// let result: LastAndData<Vec<Trade>> = serde_json::from_str(json).unwrap();
-///
-/// assert_eq!(result.last, "12345");
-/// assert_eq!(result.data.len(), 1);
-/// ```
+/// Handles Kraken's pagination format where the response contains a dynamically-named data field (e.g. "XBTUSD") and a "last" cursor field.
 #[derive(Debug, Clone)]
 pub struct LastAndData<T> {
     /// The pagination cursor for the next request.
@@ -88,7 +68,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for LastAndData<T> {
 
                 while let Some(key) = map.next_key::<String>()? {
                     if key == "last" {
-                        // Handle both string and numeric "last" values
+                        // Kraken returns "last" as either a string or a number.
                         let value: serde_json::Value = map.next_value()?;
                         last = Some(match value {
                             serde_json::Value::String(s) => s,
@@ -100,7 +80,6 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for LastAndData<T> {
                             }
                         });
                     } else {
-                        // Any other key is the data
                         data = Some(map.next_value()?);
                     }
                 }
@@ -130,9 +109,7 @@ impl<T: serde::Serialize> serde::Serialize for LastAndData<T> {
     }
 }
 
-/// A variant of LastAndData that also captures the key name.
-///
-/// This is useful when you need to know which asset pair the data is for.
+/// A variant of `LastAndData` that also captures the key name, for when the asset pair matters.
 #[derive(Debug, Clone)]
 pub struct LastAndDataWithKey<T> {
     /// The key (e.g., "XBTUSD").

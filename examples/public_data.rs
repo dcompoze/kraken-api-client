@@ -1,7 +1,4 @@
-//! Example: Fetching public market data from Kraken.
-//!
-//! This example demonstrates how to use the Kraken REST API to fetch
-//! publicly available market data without authentication.
+//! Example: Fetching public market data without authentication.
 //!
 //! Run with: cargo run --example public_data
 
@@ -14,22 +11,19 @@ use kraken_api_client::types::OhlcInterval;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a client for public endpoints (no credentials needed)
+    // Public endpoints need no credentials.
     let client = SpotRestClient::new();
 
-    // Get server time
     println!("=== Server Time ===");
     let time = client.get_server_time().await?;
     println!("Unix time: {}", time.unixtime);
     println!("RFC1123: {}", time.rfc1123);
 
-    // Get system status
     println!("\n=== System Status ===");
     let status = client.get_system_status().await?;
     println!("Status: {}", status.status);
     println!("Timestamp: {}", status.timestamp);
 
-    // Get asset pairs (filtered to a few)
     println!("\n=== Asset Pairs ===");
     let pairs_request = AssetPairsRequest {
         pair: Some("BTC/USD,ETH/USD".into()),
@@ -43,7 +37,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Get asset info for a few assets
     println!("\n=== Asset Info ===");
     let assets_request = AssetInfoRequest::for_assets("XBT,ETH,USD");
     let assets = client.get_assets(Some(&assets_request)).await?;
@@ -54,7 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Get ticker information
     println!("\n=== Ticker (BTC/USD) ===");
     let ticker = client.get_ticker("XBTUSD").await?;
     if let Some((pair, info)) = ticker.iter().next() {
@@ -70,12 +62,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  Open: {:?}", info.o);
     }
 
-    // Get OHLC data
     println!("\n=== OHLC (BTC/USD, 1 hour) ===");
     let ohlc_request = OhlcRequest::new("XBTUSD").interval(OhlcInterval::Hour1);
     let ohlc = client.get_ohlc(&ohlc_request).await?;
     println!("Last cursor: {}", ohlc.last);
-    // Get the first (and usually only) pair's data
+    // The result is keyed by pair name, usually a single entry.
     if let Some((_pair, candles)) = ohlc.data.iter().next() {
         for candle in candles.iter().rev().take(3) {
             println!(
@@ -85,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Get order book
     println!("\n=== Order Book (BTC/USD, depth=5) ===");
     let book_request = OrderBookRequest {
         pair: "XBTUSD".into(),
@@ -104,12 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Get recent trades
     println!("\n=== Recent Trades (BTC/USD) ===");
     let trades_request = RecentTradesRequest::new("XBTUSD").count(5);
     let trades_response = client.get_recent_trades(&trades_request).await?;
     println!("Last cursor: {}", trades_response.last);
-    // Get the first (and usually only) pair's trades
     if let Some((_pair, trades)) = trades_response.trades.iter().next() {
         for trade in trades.iter().take(5) {
             println!(
@@ -119,7 +107,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Get recent spreads
     println!("\n=== Recent Spreads (BTC/USD) ===");
     let spreads_request = RecentSpreadsRequest::new("XBTUSD");
     let spreads = client.get_recent_spreads(&spreads_request).await?;

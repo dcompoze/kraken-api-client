@@ -40,47 +40,7 @@ use crate::spot::rest::traits::KrakenClient;
 
 /// The Kraken Spot REST API client.
 ///
-/// This client provides access to all Kraken Spot trading REST endpoints.
-/// It handles authentication, rate limiting, and automatic retries.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use kraken_api_client::spot::rest::SpotRestClient;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Create a client for public endpoints only
-///     let client = SpotRestClient::new();
-///
-///     // Get server time
-///     let time = client.get_server_time().await?;
-///     println!("Server time: {:?}", time);
-///
-///     Ok(())
-/// }
-/// ```
-///
-/// For private endpoints, provide credentials:
-///
-/// ```rust,no_run
-/// use kraken_api_client::spot::rest::SpotRestClient;
-/// use kraken_api_client::auth::StaticCredentials;
-/// use std::sync::Arc;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let credentials = Arc::new(StaticCredentials::new("api_key", "api_secret"));
-///     let client = SpotRestClient::builder()
-///         .credentials(credentials)
-///         .build();
-///
-///     let balance = client.get_account_balance().await?;
-///     println!("Balance: {:?}", balance);
-///
-///     Ok(())
-/// }
-/// ```
+/// Handles request signing and automatic retries.
 #[derive(Clone)]
 pub struct SpotRestClient {
     http_client: ClientWithMiddleware,
@@ -90,10 +50,9 @@ pub struct SpotRestClient {
 }
 
 impl SpotRestClient {
-    /// Create a new client with default settings.
+    /// Create a new client without credentials.
     ///
-    /// This client can only access public endpoints.
-    /// Use [`SpotRestClient::builder()`] to configure credentials for private endpoints.
+    /// Such a client can only access public endpoints.
     pub fn new() -> Self {
         Self::builder().build()
     }
@@ -152,7 +111,6 @@ impl SpotRestClient {
         let nonce = self.nonce_provider.next_nonce();
         let creds = credentials.get_credentials();
 
-        // Build the POST body with nonce.
         let mut form_data = serde_urlencoded::to_string(params)
             .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
 
@@ -162,7 +120,6 @@ impl SpotRestClient {
             form_data = format!("nonce={}&{}", nonce, form_data);
         }
 
-        // Sign the request.
         let signature = sign_request(creds, endpoint, nonce, &form_data)?;
 
         let url = format!("{}{}", self.base_url, endpoint);
@@ -200,7 +157,7 @@ impl SpotRestClient {
         let nonce = self.nonce_provider.next_nonce();
         let creds = credentials.get_credentials();
 
-        // Build the JSON body with the nonce injected at the top level.
+        // The nonce must be part of the signed JSON body.
         let mut value = serde_json::to_value(params)
             .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
         match value.as_object_mut() {
@@ -216,7 +173,6 @@ impl SpotRestClient {
         let body = serde_json::to_string(&value)
             .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
 
-        // Sign the request.
         let signature = sign_request(creds, endpoint, nonce, &body)?;
 
         let url = format!("{}{}", self.base_url, endpoint);
@@ -322,7 +278,6 @@ impl SpotRestClient {
             KrakenError::InvalidResponse(format!("Failed to parse response: {}. Body: {}", e, body))
         })?;
 
-        // Check for API errors.
         if !parsed.error.is_empty() {
             if let Some(api_error) = ApiError::from_error_array(&parsed.error) {
                 if api_error.is_rate_limit() {
@@ -334,7 +289,6 @@ impl SpotRestClient {
             }
         }
 
-        // Return the result.
         parsed.result.ok_or_else(|| {
             if !status.is_success() {
                 KrakenError::InvalidResponse(format!("HTTP {}: {}", status, body))
@@ -413,7 +367,6 @@ impl SpotRestClientBuilder {
 
     /// Build the client.
     pub fn build(self) -> SpotRestClient {
-        // Build default headers.
         let mut headers = HeaderMap::new();
         let user_agent = self
             .user_agent
@@ -422,7 +375,6 @@ impl SpotRestClientBuilder {
             .unwrap_or_else(|_| HeaderValue::from_static("kraken-api-client"));
         headers.insert(USER_AGENT, header_value);
 
-        // Build the HTTP client with middleware.
         let reqwest_client = reqwest::Client::builder()
             .default_headers(headers)
             .build()
@@ -461,11 +413,7 @@ struct KrakenResponse<T> {
     result: Option<T>,
 }
 
-// KrakenClient trait implementation.
-
 impl KrakenClient for SpotRestClient {
-    // ========== Public Endpoints ==========
-
     async fn get_server_time(&self) -> Result<ServerTime, KrakenError> {
         SpotRestClient::get_server_time(self).await
     }
@@ -516,8 +464,6 @@ impl KrakenClient for SpotRestClient {
     ) -> Result<RecentSpreadsResponse, KrakenError> {
         SpotRestClient::get_recent_spreads(self, request).await
     }
-
-    // ========== Private Endpoints - Account ==========
 
     async fn get_account_balance(&self) -> Result<HashMap<String, Decimal>, KrakenError> {
         SpotRestClient::get_account_balance(self).await
@@ -749,8 +695,6 @@ impl KrakenClient for SpotRestClient {
         SpotRestClient::list_earn_allocations(self, request).await
     }
 
-    // ========== Private Endpoints - Trading ==========
-
     async fn add_order(&self, request: &AddOrderRequest) -> Result<AddOrderResponse, KrakenError> {
         SpotRestClient::add_order(self, request).await
     }
@@ -800,8 +744,6 @@ impl KrakenClient for SpotRestClient {
     ) -> Result<CancelOrderResponse, KrakenError> {
         SpotRestClient::cancel_order_batch(self, request).await
     }
-
-    // ========== Private Endpoints - WebSocket ==========
 
     async fn get_websocket_token(&self) -> Result<WebSocketToken, KrakenError> {
         SpotRestClient::get_websocket_token(self).await

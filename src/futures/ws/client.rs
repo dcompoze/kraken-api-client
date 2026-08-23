@@ -34,7 +34,7 @@ impl Default for WsConfig {
         Self {
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(60),
-            max_reconnect_attempts: None, // Infinite reconnect attempts.
+            max_reconnect_attempts: None,
             ping_interval: Duration::from_secs(30),
             pong_timeout: Duration::from_secs(10),
         }
@@ -95,29 +95,10 @@ impl WsConfigBuilder {
 
 /// Kraken Futures WebSocket client.
 ///
-/// Provides methods to connect to public and private WebSocket feeds
-/// with automatic reconnection and subscription restoration.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use kraken_api_client::futures::ws::{FuturesWsClient, feeds};
-/// use futures_util::StreamExt;
-///
-/// let client = FuturesWsClient::new();
-/// let mut stream = client.connect_public().await?;
-///
-/// stream.subscribe_public(feeds::TICKER, vec!["PI_XBTUSD"]).await?;
-///
-/// while let Some(msg) = stream.next().await {
-///     println!("{:?}", msg);
-/// }
-/// ```
+/// Connects to public and private WebSocket feeds with automatic reconnection and subscription restoration.
 #[derive(Debug, Clone)]
 pub struct FuturesWsClient {
-    /// WebSocket URL.
     url: String,
-    /// Connection configuration.
     config: WsConfig,
 }
 
@@ -161,59 +142,12 @@ impl FuturesWsClient {
         &self.config
     }
 
-    /// Connect to the public WebSocket endpoint.
-    ///
-    /// Returns a stream that can subscribe to public feeds (ticker, book, trades).
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::futures::ws::{FuturesWsClient, feeds};
-    /// use futures_util::StreamExt;
-    ///
-    /// let client = FuturesWsClient::new();
-    /// let mut stream = client.connect_public().await?;
-    ///
-    /// stream.subscribe_public(feeds::BOOK, vec!["PI_XBTUSD"]).await?;
-    ///
-    /// while let Some(msg) = stream.next().await {
-    ///     match msg? {
-    ///         FuturesWsEvent::Book(book) => println!("Book: {:?}", book),
-    ///         _ => {}
-    ///     }
-    /// }
-    /// ```
+    /// Connect and return a stream that can subscribe to public feeds.
     pub async fn connect_public(&self) -> Result<FuturesStream, KrakenError> {
         FuturesStream::connect_public(&self.url, self.config.clone()).await
     }
 
-    /// Connect to the private WebSocket endpoint with authentication.
-    ///
-    /// This will perform the challenge/response authentication automatically.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use kraken_api_client::futures::ws::{FuturesWsClient, feeds};
-    /// use kraken_api_client::auth::StaticCredentials;
-    /// use futures_util::StreamExt;
-    /// use std::sync::Arc;
-    ///
-    /// let credentials = Arc::new(StaticCredentials::new("api_key", "api_secret"));
-    /// let client = FuturesWsClient::new();
-    /// let mut stream = client.connect_private(credentials).await?;
-    ///
-    /// stream.subscribe_private(feeds::OPEN_ORDERS).await?;
-    /// stream.subscribe_private(feeds::FILLS).await?;
-    ///
-    /// while let Some(msg) = stream.next().await {
-    ///     match msg? {
-    ///         FuturesWsEvent::Order(order) => println!("Order: {:?}", order),
-    ///         FuturesWsEvent::Fill(fill) => println!("Fill: {:?}", fill),
-    ///         _ => {}
-    ///     }
-    /// }
-    /// ```
+    /// Connect with authentication, performing the challenge/response handshake automatically.
     pub async fn connect_private(
         &self,
         credentials: Arc<dyn CredentialsProvider>,
@@ -247,35 +181,19 @@ impl Default for FuturesWsClient {
 
 /// Sign a WebSocket challenge for authentication.
 ///
-/// The Futures WebSocket API uses challenge-based authentication:
-/// 1. SHA-256 hash the challenge message
-/// 2. HMAC-SHA-512 with the base64-decoded API secret
-/// 3. Base64 encode the result
-///
-/// # Arguments
-///
-/// * `credentials` - API credentials containing the secret
-/// * `challenge` - The challenge string received from the server
-///
-/// # Returns
-///
-/// Base64-encoded signed challenge.
+/// The signed challenge is `Base64(HMAC-SHA512(SHA256(challenge), base64-decoded secret))`.
 pub fn sign_challenge(credentials: &Credentials, challenge: &str) -> Result<String, KrakenError> {
-    // Decode the API secret from base64.
     let secret_decoded = BASE64
         .decode(credentials.expose_secret())
         .map_err(|_| KrakenError::Auth("API secret must be valid base64.".to_string()))?;
 
-    // SHA-256 hash the challenge.
     let sha256_hash = Sha256::digest(challenge.as_bytes());
 
-    // HMAC-SHA-512 with the decoded secret.
     let mut hmac = HmacSha512::new_from_slice(&secret_decoded)
         .map_err(|e| KrakenError::Auth(format!("Invalid HMAC key: {e}")))?;
     hmac.update(&sha256_hash);
     let hmac_result = hmac.finalize().into_bytes();
 
-    // Base64 encode the result.
     Ok(BASE64.encode(hmac_result))
 }
 
@@ -285,15 +203,12 @@ mod tests {
 
     #[test]
     fn test_sign_challenge() {
-        // Test that challenge signing produces correct format
         let secret = BASE64.encode("test_secret_key");
         let credentials = Credentials::new("api_key", secret);
 
         let signed = sign_challenge(&credentials, "123e4567-e89b-12d3-a456-426614174000").unwrap();
 
-        // Should be valid base64
         assert!(BASE64.decode(&signed).is_ok());
-        // HMAC-SHA512 produces 64 bytes, base64 encoded = 88 chars
         assert_eq!(signed.len(), 88);
     }
 

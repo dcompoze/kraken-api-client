@@ -16,49 +16,8 @@ use crate::futures::types::*;
 
 /// The Kraken Futures REST API client.
 ///
-/// This client provides access to all Kraken Futures trading REST endpoints.
-/// It handles authentication, rate limiting, and automatic retries.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use kraken_api_client::futures::rest::FuturesRestClient;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Create a client for public endpoints only
-///     let client = FuturesRestClient::new();
-///
-///     // Get all tickers
-///     let tickers = client.get_tickers().await?;
-///     for ticker in &tickers {
-///         println!("{}: {}", ticker.symbol, ticker.last);
-///     }
-///
-///     Ok(())
-/// }
-/// ```
-///
-/// For private endpoints, provide credentials:
-///
-/// ```rust,no_run
-/// use kraken_api_client::futures::rest::FuturesRestClient;
-/// use kraken_api_client::auth::StaticCredentials;
-/// use std::sync::Arc;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let credentials = Arc::new(StaticCredentials::new("api_key", "api_secret"));
-///     let client = FuturesRestClient::builder()
-///         .credentials(credentials)
-///         .build();
-///
-///     let accounts = client.get_accounts().await?;
-///     println!("Accounts: {:?}", accounts);
-///
-///     Ok(())
-/// }
-/// ```
+/// Handles authentication, rate limiting, and automatic retries.
+/// Private endpoints require credentials configured via [`FuturesRestClient::builder()`].
 #[derive(Clone)]
 pub struct FuturesRestClient {
     http_client: ClientWithMiddleware,
@@ -68,10 +27,7 @@ pub struct FuturesRestClient {
 }
 
 impl FuturesRestClient {
-    /// Create a new client with default settings.
-    ///
-    /// This client can only access public endpoints.
-    /// Use [`FuturesRestClient::builder()`] to configure credentials for private endpoints.
+    /// Create a new client that can only access public endpoints.
     pub fn new() -> Self {
         Self::builder().build()
     }
@@ -143,7 +99,6 @@ impl FuturesRestClient {
         let nonce = self.nonce_provider.next_nonce();
         let creds = credentials.get_credentials();
 
-        // Sign the request (empty post_data for GET).
         let signature = sign_futures_request(creds, endpoint, nonce, "")?;
 
         let url = self.endpoint_url(endpoint);
@@ -262,11 +217,9 @@ impl FuturesRestClient {
         let nonce = self.nonce_provider.next_nonce();
         let creds = credentials.get_credentials();
 
-        // Build the POST body.
         let form_data = serde_urlencoded::to_string(params)
             .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
 
-        // Sign the request using the Futures algorithm.
         let signature = sign_futures_request(creds, endpoint, nonce, &form_data)?;
 
         let url = self.endpoint_url(endpoint);
@@ -296,7 +249,6 @@ impl FuturesRestClient {
         let status = response.status();
         let body = response.text().await?;
 
-        // First check if it is an error response.
         if let Ok(error_response) = serde_json::from_str::<FuturesErrorResponse>(&body) {
             if error_response.result == "error" {
                 return Err(KrakenError::Api(crate::error::ApiError::new(
@@ -308,7 +260,6 @@ impl FuturesRestClient {
             }
         }
 
-        // Try to parse as success response.
         serde_json::from_str::<T>(&body).map_err(|e| {
             if !status.is_success() {
                 KrakenError::InvalidResponse(format!("HTTP {}: {}", status, body))
@@ -323,27 +274,19 @@ impl FuturesRestClient {
 
     // Public endpoints.
 
-    /// Get all tickers.
-    ///
-    /// Returns ticker data for all available futures contracts.
+    /// Get ticker data for all available futures contracts.
     pub async fn get_tickers(&self) -> Result<Vec<FuturesTicker>, KrakenError> {
         let response: TickersResponse = self.public_get(public::TICKERS).await?;
         Ok(response.tickers)
     }
 
-    /// Get ticker for a specific symbol.
-    ///
-    /// Returns ticker data for the specified symbol, or None if not found.
+    /// Get ticker data for a specific symbol, or `None` if not found.
     pub async fn get_ticker(&self, symbol: &str) -> Result<Option<FuturesTicker>, KrakenError> {
         let tickers = self.get_tickers().await?;
         Ok(tickers.into_iter().find(|t| t.symbol == symbol))
     }
 
-    /// Get order book for a symbol.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
+    /// Get the order book for a symbol.
     pub async fn get_orderbook(&self, symbol: &str) -> Result<FuturesOrderBook, KrakenError> {
         #[derive(serde::Serialize)]
         struct Params<'a> {
@@ -357,10 +300,7 @@ impl FuturesRestClient {
 
     /// Get recent trade history for a symbol.
     ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
-    /// * `last_time` - Optional timestamp to get trades before
+    /// `last_time` limits the result to trades before that timestamp.
     pub async fn get_trade_history(
         &self,
         symbol: &str,
@@ -379,27 +319,19 @@ impl FuturesRestClient {
         Ok(response.history)
     }
 
-    /// Get available instruments.
-    ///
-    /// Returns information about all tradeable futures contracts.
+    /// Get information about all available futures contracts.
     pub async fn get_instruments(&self) -> Result<Vec<FuturesInstrument>, KrakenError> {
         let response: InstrumentsResponse = self.public_get(public::INSTRUMENTS).await?;
         Ok(response.instruments)
     }
 
-    /// Get fee schedules.
-    ///
-    /// Returns all fee schedules with their tiers.
+    /// Get all fee schedules with their tiers.
     pub async fn get_fee_schedules(&self) -> Result<Vec<FeeSchedule>, KrakenError> {
         let response: FeeSchedulesResponse = self.public_get(public::FEE_SCHEDULES).await?;
         Ok(response.fee_schedules)
     }
 
     /// Get historical funding rates for a symbol.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
     pub async fn get_historical_funding_rates(
         &self,
         symbol: &str,
@@ -416,13 +348,8 @@ impl FuturesRestClient {
 
     /// Get OHLC candles for a symbol.
     ///
-    /// # Arguments
-    ///
-    /// * `tick_type` - The kind of price data (spot, mark, or trade)
-    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
-    /// * `resolution` - The candle resolution (e.g., "1m", "1h", "1d")
-    /// * `from` - Optional start time in epoch seconds
-    /// * `to` - Optional end time in epoch seconds (inclusive)
+    /// `resolution` is a candle interval such as "1m", "1h", or "1d".
+    /// `from` and `to` are epoch seconds, with `to` inclusive.
     pub async fn get_ohlc(
         &self,
         tick_type: TickType,
@@ -451,36 +378,24 @@ impl FuturesRestClient {
 
     // Private endpoints: account.
 
-    /// Get account information.
-    ///
-    /// Returns balances, margin info, and PnL for all accounts.
+    /// Get balances, margin info, and PnL for all accounts.
     pub async fn get_accounts(&self) -> Result<AccountsResponse, KrakenError> {
         self.private_get(private::ACCOUNTS).await
     }
 
-    /// Get open positions.
-    ///
-    /// Returns all open futures positions.
+    /// Get all open futures positions.
     pub async fn get_open_positions(&self) -> Result<Vec<FuturesPosition>, KrakenError> {
         let response: OpenPositionsResponse = self.private_get(private::OPEN_POSITIONS).await?;
         Ok(response.open_positions)
     }
 
-    /// Get open orders.
-    ///
-    /// Returns all open (unfilled) orders.
+    /// Get all open (unfilled) orders.
     pub async fn get_open_orders(&self) -> Result<Vec<FuturesOrder>, KrakenError> {
         let response: OpenOrdersResponse = self.private_get(private::OPEN_ORDERS).await?;
         Ok(response.open_orders)
     }
 
-    /// Get fills (trade history).
-    ///
-    /// Returns fills for all futures contracts or a specific symbol.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Optional request parameters
+    /// Get fills (trade history) for all futures contracts or a specific symbol.
     pub async fn get_fills(
         &self,
         request: Option<&FillsRequest>,
@@ -495,10 +410,6 @@ impl FuturesRestClient {
     // Private endpoints: trading.
 
     /// Send a new order.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Order parameters
     pub async fn send_order(
         &self,
         request: &SendOrderRequest,
@@ -507,10 +418,6 @@ impl FuturesRestClient {
     }
 
     /// Edit an existing order.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Edit parameters
     pub async fn edit_order(
         &self,
         request: &EditOrderRequest,
@@ -518,11 +425,7 @@ impl FuturesRestClient {
         self.private_post(private::EDIT_ORDER, request).await
     }
 
-    /// Cancel an order.
-    ///
-    /// # Arguments
-    ///
-    /// * `order_id` - The order ID to cancel
+    /// Cancel an order by order ID.
     pub async fn cancel_order(&self, order_id: &str) -> Result<CancelOrderResponse, KrakenError> {
         #[derive(serde::Serialize)]
         struct Params<'a> {
@@ -533,10 +436,6 @@ impl FuturesRestClient {
     }
 
     /// Cancel an order by client order ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `cli_ord_id` - The client order ID to cancel
     pub async fn cancel_order_by_cli_ord_id(
         &self,
         cli_ord_id: &str,
@@ -550,9 +449,7 @@ impl FuturesRestClient {
             .await
     }
 
-    /// Cancel all orders.
-    ///
-    /// Cancels all open orders for the account.
+    /// Cancel all open orders for the account.
     pub async fn cancel_all_orders(&self) -> Result<CancelAllOrdersResponse, KrakenError> {
         #[derive(serde::Serialize)]
         struct Empty {}
@@ -560,11 +457,7 @@ impl FuturesRestClient {
             .await
     }
 
-    /// Cancel all orders for a specific symbol.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol to cancel orders for
+    /// Cancel all open orders for a specific symbol.
     pub async fn cancel_all_orders_for_symbol(
         &self,
         symbol: &str,
@@ -577,11 +470,9 @@ impl FuturesRestClient {
             .await
     }
 
-    /// Set dead man's switch (cancel all orders after timeout).
+    /// Set the dead man's switch to cancel all orders after a timeout.
     ///
-    /// # Arguments
-    ///
-    /// * `timeout_seconds` - Timeout in seconds (0 to disable)
+    /// A timeout of 0 disables the switch.
     pub async fn cancel_all_orders_after(
         &self,
         timeout_seconds: u32,
@@ -599,13 +490,7 @@ impl FuturesRestClient {
         .await
     }
 
-    /// Send batch orders.
-    ///
-    /// Allows placing, editing, and cancelling multiple orders in a single request.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Batch order request
+    /// Place, edit, and cancel multiple orders in a single request.
     pub async fn batch_order(
         &self,
         request: &BatchOrderRequest,
@@ -614,10 +499,6 @@ impl FuturesRestClient {
     }
 
     /// Get the status of orders by order ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `order_ids` - The order IDs to query
     pub async fn get_orders_status(
         &self,
         order_ids: &[&str],
@@ -627,10 +508,6 @@ impl FuturesRestClient {
     }
 
     /// Get the status of orders by client order ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `cli_ord_ids` - The client order IDs to query
     pub async fn get_orders_status_by_cli_ord_ids(
         &self,
         cli_ord_ids: &[&str],
@@ -642,10 +519,6 @@ impl FuturesRestClient {
     // Private endpoints: transfers and withdrawals.
 
     /// Transfer funds between margin accounts.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Transfer parameters
     pub async fn transfer(
         &self,
         request: &TransferRequest,
@@ -654,10 +527,6 @@ impl FuturesRestClient {
     }
 
     /// Transfer funds between the main account and a subaccount.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Transfer parameters
     pub async fn sub_account_transfer(
         &self,
         request: &SubAccountTransferRequest,
@@ -669,10 +538,6 @@ impl FuturesRestClient {
     /// Withdraw funds from the futures wallet to the spot wallet.
     ///
     /// This endpoint is not available in the demo environment.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Withdrawal parameters
     pub async fn withdrawal_to_spot_wallet(
         &self,
         request: &WithdrawalRequest,
@@ -685,10 +550,6 @@ impl FuturesRestClient {
     /// Get account log entries.
     ///
     /// This endpoint is not available in the demo environment.
-    ///
-    /// # Arguments
-    ///
-    /// * `request` - Optional pagination and filter parameters
     pub async fn get_account_log(
         &self,
         request: Option<&AccountLogRequest>,
@@ -708,9 +569,7 @@ impl FuturesRestClient {
         Ok(response.notifications)
     }
 
-    /// Get personal volumes per fee schedule.
-    ///
-    /// Returns the 30 day USD volume keyed by fee schedule UID.
+    /// Get personal 30 day USD volumes keyed by fee schedule UID.
     pub async fn get_fee_schedule_volumes(
         &self,
     ) -> Result<FeeScheduleVolumesResponse, KrakenError> {
@@ -723,9 +582,7 @@ impl FuturesRestClient {
         Ok(response.queue)
     }
 
-    /// Get leverage preferences.
-    ///
-    /// Returns the maximum leverage per symbol.
+    /// Get the maximum leverage preference per symbol.
     pub async fn get_leverage_preferences(&self) -> Result<Vec<LeveragePreference>, KrakenError> {
         let response: LeveragePreferencesResponse =
             self.private_get(private::LEVERAGE_PREFERENCES).await?;
@@ -734,10 +591,7 @@ impl FuturesRestClient {
 
     /// Set the leverage preference for a symbol.
     ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol (e.g., "PF_XBTUSD")
-    /// * `max_leverage` - The maximum leverage, or None to reset to default
+    /// A `max_leverage` of `None` resets the preference to the default.
     pub async fn set_leverage_preference(
         &self,
         symbol: &str,
@@ -766,12 +620,7 @@ impl FuturesRestClient {
         Ok(response.preferences)
     }
 
-    /// Set the PnL currency preference for a symbol.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The futures symbol (e.g., "PF_XBTUSD")
-    /// * `pnl_preference` - The currency in which profits and losses are realized
+    /// Set the currency in which profits and losses are realized for a symbol.
     pub async fn set_pnl_preference(
         &self,
         symbol: &str,
@@ -872,7 +721,6 @@ impl FuturesRestClientBuilder {
 
     /// Build the client.
     pub fn build(self) -> FuturesRestClient {
-        // Build default headers.
         let mut headers = HeaderMap::new();
         let user_agent = self
             .user_agent
@@ -881,7 +729,6 @@ impl FuturesRestClientBuilder {
             .unwrap_or_else(|_| HeaderValue::from_static("kraken-api-client"));
         headers.insert(USER_AGENT, header_value);
 
-        // Build the HTTP client with middleware.
         let reqwest_client = reqwest::Client::builder()
             .default_headers(headers)
             .build()

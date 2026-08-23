@@ -95,7 +95,6 @@ impl ApiError {
     /// Kraken returns errors as an array like `["EGeneral:Invalid arguments"]`
     pub fn from_error_array(errors: &[String]) -> Option<Self> {
         errors.first().map(|e| {
-            // Kraken errors are in format "ECategory:Message"
             let parts: Vec<&str> = e.splitn(2, ':').collect();
             if parts.len() == 2 {
                 Self::new(parts[0], parts[1])
@@ -144,33 +143,28 @@ impl ApiError {
 
 /// Known Kraken error codes for pattern matching.
 pub mod error_codes {
-    /// General errors
     pub const INVALID_ARGUMENTS: &str = "EGeneral:Invalid arguments";
     pub const PERMISSION_DENIED: &str = "EGeneral:Permission denied";
     pub const UNKNOWN_METHOD: &str = "EGeneral:Unknown method";
     pub const INTERNAL_ERROR: &str = "EGeneral:Internal error";
 
-    /// API errors
     pub const INVALID_KEY: &str = "EAPI:Invalid key";
     pub const INVALID_SIGNATURE: &str = "EAPI:Invalid signature";
     pub const INVALID_NONCE: &str = "EAPI:Invalid nonce";
     pub const RATE_LIMIT_EXCEEDED: &str = "EAPI:Rate limit exceeded";
     pub const FEATURE_DISABLED: &str = "EAPI:Feature disabled";
 
-    /// Order errors
     pub const ORDER_RATE_LIMIT: &str = "EOrder:Rate limit exceeded";
     pub const INSUFFICIENT_FUNDS: &str = "EOrder:Insufficient funds";
     pub const INVALID_ORDER: &str = "EOrder:Invalid order";
     pub const ORDER_NOT_FOUND: &str = "EOrder:Unknown order";
     pub const MARGIN_LIMIT: &str = "EOrder:Margin limit exceeded";
 
-    /// Service errors
     pub const SERVICE_UNAVAILABLE: &str = "EService:Unavailable";
     pub const SERVICE_BUSY: &str = "EService:Busy";
     pub const SERVICE_MARKET_IN_CANCEL_ONLY: &str = "EService:Market in cancel_only mode";
     pub const SERVICE_MARKET_IN_POST_ONLY: &str = "EService:Market in post_only mode";
 
-    /// Query errors
     pub const UNKNOWN_ASSET_PAIR: &str = "EQuery:Unknown asset pair";
     pub const UNKNOWN_ASSET: &str = "EQuery:Unknown asset";
 }

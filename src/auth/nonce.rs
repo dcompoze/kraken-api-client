@@ -1,26 +1,19 @@
 //! Nonce generation for Kraken API authentication.
 //!
-//! Kraken requires a strictly increasing nonce for each authenticated request
-//! to prevent replay attacks.
+//! Kraken requires a strictly increasing nonce for each authenticated request.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Trait for providing nonces for authenticated requests.
-///
-/// The nonce must be strictly increasing for each request.
-/// Kraken recommends using a timestamp-based approach.
 pub trait NonceProvider: Send + Sync {
     /// Generate the next nonce value.
     ///
-    /// This value must be greater than any previously returned value.
+    /// The value must be greater than any previously returned value.
     fn next_nonce(&self) -> u64;
 }
 
-/// A nonce provider that generates strictly increasing nonces based on time.
-///
-/// Uses microseconds since UNIX epoch, with an atomic counter to ensure
-/// uniqueness even for requests made in the same microsecond.
+/// A nonce provider based on microseconds since UNIX epoch, with an atomic counter to stay strictly increasing within the same microsecond.
 pub struct IncreasingNonce {
     last_nonce: AtomicU64,
 }
@@ -52,8 +45,6 @@ impl NonceProvider for IncreasingNonce {
     fn next_nonce(&self) -> u64 {
         let time_nonce = Self::current_time_micros();
 
-        // Ensure the nonce is strictly increasing.
-        // Use the max of current time and last + 1.
         loop {
             let last = self.last_nonce.load(Ordering::SeqCst);
             let next = time_nonce.max(last + 1);
@@ -65,7 +56,6 @@ impl NonceProvider for IncreasingNonce {
             {
                 return next;
             }
-            // If CAS failed, another thread updated the value. Retry.
         }
     }
 }

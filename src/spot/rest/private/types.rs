@@ -643,7 +643,7 @@ pub struct WebSocketToken {
     pub expires: u32,
 }
 
-// Funding Endpoints
+// Funding endpoints.
 
 /// Request for available deposit methods.
 #[derive(Debug, Clone, Serialize)]
@@ -1103,7 +1103,7 @@ pub struct ConfirmationRefId {
     pub ref_id: String,
 }
 
-// Earn Endpoints
+// Earn endpoints.
 
 /// Request to allocate funds to an earn strategy.
 #[derive(Debug, Clone, Serialize)]
@@ -1433,7 +1433,7 @@ pub struct EarnAmount {
     pub native: Decimal,
 }
 
-// Query endpoints
+// Query endpoints.
 
 /// Request to query trades by transaction ID.
 #[derive(Debug, Clone, Serialize)]
@@ -1555,7 +1555,7 @@ pub struct OrderAmends {
     pub count: u32,
 }
 
-// Trading endpoints
+// Trading endpoints.
 
 /// Request to edit an existing order.
 ///
@@ -1983,7 +1983,7 @@ pub struct CancelAllOrdersAfterResponse {
     pub trigger_time: String,
 }
 
-// Export report endpoints
+// Export report endpoints.
 
 /// Type of data to export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -2158,7 +2158,7 @@ pub struct RemoveExportResponse {
     pub cancel: Option<bool>,
 }
 
-// Subaccount endpoints
+// Subaccount endpoints.
 
 /// Request to create a trading subaccount.
 #[derive(Debug, Clone, Serialize)]

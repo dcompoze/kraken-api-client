@@ -1,7 +1,4 @@
-//! Example: Streaming ticker data via WebSocket.
-//!
-//! This example demonstrates how to use the Kraken WebSocket API to
-//! receive real-time ticker updates for trading pairs.
+//! Example: Streaming real-time ticker updates via the public WebSocket API.
 //!
 //! Run with: cargo run --example ws_ticker
 
@@ -11,18 +8,15 @@ use kraken_api_client::spot::ws::{SpotWsClient, WsMessageEvent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing for logging (optional)
     tracing_subscriber::fmt::init();
 
     println!("Connecting to Kraken WebSocket...");
 
-    // Create WebSocket client and connect to public endpoint
     let client = SpotWsClient::new();
     let mut stream = client.connect_public().await?;
 
     println!("Connected! Subscribing to ticker...");
 
-    // Subscribe to ticker channel for BTC/USD and ETH/USD
     let ticker_params = SubscribeParams::public(
         channels::TICKER,
         vec!["BTC/USD".into(), "ETH/USD".into()],
@@ -32,7 +26,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Subscribed! Waiting for ticker updates...\n");
     println!("Press Ctrl+C to exit.\n");
 
-    // Process incoming messages
     let mut message_count = 0;
     while let Some(msg) = stream.next().await {
         match msg {
@@ -43,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 WsMessageEvent::Heartbeat(_) => {
-                    // Heartbeats are normal, just ignore or log at debug level
+                    // Heartbeats arrive continuously and can be ignored.
                 }
                 WsMessageEvent::Pong(pong) => {
                     println!("[Pong] req_id: {:?}", pong.req_id);
@@ -63,7 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 WsMessageEvent::ChannelData(data) => {
-                    // Parse ticker data from the channel message
                     let channel = data["channel"].as_str().unwrap_or("");
                     if channel == "ticker" {
                         if let Some(ticker_data) = data["data"].as_array() {
@@ -104,9 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 WsMessageEvent::Reconnected => {
                     println!("[Reconnected] Connection restored");
                 }
-                _ => {
-                    // Handle other events (trading responses, etc.)
-                }
+                _ => {}
             },
             Err(e) => {
                 println!("[Error] {:?}", e);
@@ -115,7 +105,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Clean up
     stream.close().await?;
     println!("Connection closed.");
 

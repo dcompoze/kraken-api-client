@@ -21,9 +21,7 @@ impl Credentials {
         }
     }
 
-    /// Get the API secret for signing.
-    ///
-    /// This method exposes the secret - use carefully.
+    /// Expose the API secret for signing.
     pub fn expose_secret(&self) -> &str {
         self.api_secret.expose_secret()
     }
@@ -38,10 +36,7 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
-/// Trait for providing API credentials.
-///
-/// Implement this trait to customize how credentials are retrieved,
-/// for example from a secrets manager or environment variables.
+/// Trait for providing API credentials, for example from a secrets manager.
 pub trait CredentialsProvider: Send + Sync {
     /// Get the credentials.
     fn get_credentials(&self) -> &Credentials;
@@ -82,11 +77,7 @@ pub struct EnvCredentials {
 }
 
 impl EnvCredentials {
-    /// Create credentials from default environment variables.
-    ///
-    /// Reads `KRAKEN_API_KEY` and `KRAKEN_API_SECRET`.
-    ///
-    /// # Panics
+    /// Create credentials from `KRAKEN_API_KEY` and `KRAKEN_API_SECRET`.
     ///
     /// Panics if the environment variables are not set.
     pub fn from_env() -> Self {
@@ -94,8 +85,6 @@ impl EnvCredentials {
     }
 
     /// Create credentials from custom environment variable names.
-    ///
-    /// # Panics
     ///
     /// Panics if the environment variables are not set.
     pub fn from_env_vars(key_var: &str, secret_var: &str) -> Self {
@@ -109,16 +98,12 @@ impl EnvCredentials {
         }
     }
 
-    /// Try to create credentials from default environment variables.
-    ///
-    /// Returns `None` if the environment variables are not set.
+    /// Create credentials from `KRAKEN_API_KEY` and `KRAKEN_API_SECRET`, returning `None` if unset.
     pub fn try_from_env() -> Option<Self> {
         Self::try_from_env_vars("KRAKEN_API_KEY", "KRAKEN_API_SECRET")
     }
 
-    /// Try to create credentials from custom environment variable names.
-    ///
-    /// Returns `None` if the environment variables are not set.
+    /// Create credentials from custom environment variable names, returning `None` if unset.
     pub fn try_from_env_vars(key_var: &str, secret_var: &str) -> Option<Self> {
         let api_key = std::env::var(key_var).ok()?;
         let api_secret = std::env::var(secret_var).ok()?;

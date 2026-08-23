@@ -1,24 +1,4 @@
 //! Rate-limited REST client wrapper.
-//!
-//! Provides a wrapper around any [`KrakenClient`] implementation that automatically
-//! handles rate limiting based on Kraken's tier-based rate limit system.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use kraken_api_client::spot::rest::SpotRestClient;
-//! use kraken_api_client::rate_limit::{RateLimitedClient, RateLimitConfig};
-//! use kraken_api_client::types::VerificationTier;
-//!
-//! let client = SpotRestClient::new();
-//! let rate_limited = RateLimitedClient::new(client, RateLimitConfig {
-//!     tier: VerificationTier::Intermediate,
-//!     enabled: true,
-//! });
-//!
-//! // All requests will be automatically rate limited
-//! let time = rate_limited.get_server_time().await?;
-//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -60,23 +40,7 @@ use crate::types::VerificationTier;
 
 /// A rate-limited wrapper around any [`KrakenClient`] implementation.
 ///
-/// This wrapper automatically handles:
-/// - Public endpoint rate limits (sliding window)
-/// - Private endpoint rate limits (token bucket, tier-based)
-/// - Trading rate limits with order lifetime penalties
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use kraken_api_client::spot::rest::SpotRestClient;
-/// use kraken_api_client::rate_limit::{RateLimitedClient, RateLimitConfig};
-///
-/// let client = SpotRestClient::new();
-/// let rate_limited = RateLimitedClient::new(client, RateLimitConfig::default());
-///
-/// // Requests are automatically rate limited
-/// let time = rate_limited.get_server_time().await?;
-/// ```
+/// Handles public endpoint limits (sliding window), private endpoint limits (token bucket, tier-based), and trading limits with order lifetime penalties.
 pub struct RateLimitedClient<C> {
     inner: C,
     config: RateLimitConfig,
@@ -98,7 +62,7 @@ impl<C> RateLimitedClient<C> {
         Self {
             inner,
             config: config.clone(),
-            // Public: 1 request per second per endpoint
+            // Public: 1 request per second per endpoint.
             public_limiter: Arc::new(Mutex::new(SlidingWindow::new(
                 Duration::from_secs(1),
                 1,
@@ -111,7 +75,7 @@ impl<C> RateLimitedClient<C> {
                 max_counter,
                 decay_rate,
             ))),
-            // Order book: 1 request per second per pair
+            // Order book: 1 request per second per pair.
             orderbook_limiter: Arc::new(Mutex::new(KeyedRateLimiter::new(
                 Duration::from_secs(1),
                 1,
@@ -297,7 +261,7 @@ impl PrivateRateLimiter {
     fn try_acquire(&mut self) -> Result<(), Duration> {
         self.update();
 
-        // Most private endpoints cost 1 point
+        // Most private endpoints cost 1 point.
         let cost = 100;
 
         if self.counter + cost <= self.max_counter {
@@ -311,13 +275,7 @@ impl PrivateRateLimiter {
     }
 }
 
-
-// KrakenClient Trait Implementation
-
-
 impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
-    // ========== Public Endpoints ==========
-
     async fn get_server_time(&self) -> Result<ServerTime, KrakenError> {
         self.wait_public().await?;
         self.inner.get_server_time().await
@@ -358,7 +316,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         &self,
         request: &OrderBookRequest,
     ) -> Result<HashMap<String, OrderBook>, KrakenError> {
-        // Order book has per-pair rate limiting
         self.wait_orderbook(&request.pair).await?;
         self.inner.get_order_book(request).await
     }
@@ -378,8 +335,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.wait_public().await?;
         self.inner.get_recent_spreads(request).await
     }
-
-    // ========== Private Endpoints - Account ==========
 
     async fn get_account_balance(&self) -> Result<HashMap<String, Decimal>, KrakenError> {
         self.wait_private().await?;
@@ -454,8 +409,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.wait_private().await?;
         self.inner.get_trade_volume(request).await
     }
-
-    // ========== Private Endpoints - Funding ==========
 
     async fn get_deposit_methods(
         &self,
@@ -533,8 +486,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.wait_private().await?;
         self.inner.wallet_transfer(request).await
     }
-
-    // ========== Private Endpoints - Earn ==========
 
     async fn earn_allocate(&self, request: &EarnAllocateRequest) -> Result<bool, KrakenError> {
         self.wait_private().await?;
@@ -650,11 +601,8 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.inner.list_earn_allocations(request).await
     }
 
-    // ========== Private Endpoints - Trading ==========
-
     async fn add_order(&self, request: &AddOrderRequest) -> Result<AddOrderResponse, KrakenError> {
-        // Trading operations use the trading rate limiter with order tracking
-        // For add_order, we generate a temporary ID (the real ID comes in the response)
+        // The real order ID only arrives in the response, so charge the limiter under a temporary ID.
         let temp_id = format!("pending_{}", std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -736,7 +684,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.wait_trading_cancel(&request.txid).await?;
         let result = self.inner.edit_order(request).await?;
 
-        // Track the replacement order.
         if let Some(txid) = &result.txid {
             let mut limiter = self.trading_limiter.lock().await;
             limiter.track_order(txid.to_string(), OrderTrackingInfo::new(&request.pair));
@@ -749,13 +696,12 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         &self,
         request: &CancelOrderRequest,
     ) -> Result<CancelOrderResponse, KrakenError> {
-        // Apply cancellation penalty based on order age
         self.wait_trading_cancel(&request.txid).await?;
         self.inner.cancel_order(request).await
     }
 
     async fn cancel_all_orders(&self) -> Result<CancelOrderResponse, KrakenError> {
-        // Cancel all doesn't track individual orders
+        // Cancel all does not track individual orders.
         self.wait_private().await?;
         self.inner.cancel_all_orders().await
     }
@@ -791,8 +737,6 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.inner.cancel_order_batch(request).await
     }
 
-    // ========== Private Endpoints - WebSocket ==========
-
     async fn get_websocket_token(&self) -> Result<WebSocketToken, KrakenError> {
         self.wait_private().await?;
         self.inner.get_websocket_token().await
@@ -807,7 +751,6 @@ mod tests {
     fn test_private_rate_limiter_allows_initial_requests() {
         let mut limiter = PrivateRateLimiter::new(20, 1.0);
 
-        // Should allow several requests before hitting limit
         for _ in 0..15 {
             assert!(limiter.try_acquire().is_ok());
         }
@@ -817,29 +760,24 @@ mod tests {
     fn test_private_rate_limiter_blocks_when_full() {
         let mut limiter = PrivateRateLimiter::new(20, 1.0);
 
-        // Fill up the limit
         for _ in 0..20 {
             limiter.try_acquire().ok();
         }
 
-        // Next request should be blocked
         assert!(limiter.try_acquire().is_err());
     }
 
     #[test]
     fn test_private_rate_limiter_decay() {
-        let mut limiter = PrivateRateLimiter::new(20, 100.0); // High decay for testing
+        let mut limiter = PrivateRateLimiter::new(20, 100.0);
 
-        // Use some capacity
         for _ in 0..10 {
             limiter.try_acquire().ok();
         }
 
-        // Wait for decay
         std::thread::sleep(Duration::from_millis(150));
 
-        // Should have more capacity now
         limiter.update();
-        assert!(limiter.counter < 1000); // Should have decayed significantly
+        assert!(limiter.counter < 1000);
     }
 }

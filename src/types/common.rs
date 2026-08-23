@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BuySell {
-    /// Buy order
     Buy,
-    /// Sell order
     Sell,
 }
 
@@ -37,11 +35,8 @@ pub enum OrderType {
     StopLossLimit,
     /// Take-profit limit - trigger limit order when price reaches profit target
     TakeProfitLimit,
-    /// Trailing stop order
     TrailingStop,
-    /// Trailing stop limit order
     TrailingStopLimit,
-    /// Settle position order
     SettlePosition,
 }
 
@@ -68,17 +63,13 @@ impl std::fmt::Display for OrderType {
 pub enum OrderStatus {
     /// Order is pending (not yet submitted)
     Pending,
-    /// Order is open and active
     Open,
-    /// Order has been partially filled
     #[serde(alias = "partial")]
     PartiallyFilled,
     /// Order has been completely filled
     #[serde(alias = "filled")]
     Closed,
-    /// Order has been canceled
     Canceled,
-    /// Order has expired
     Expired,
 }
 
@@ -143,11 +134,8 @@ pub enum TriggerType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SelfTradePrevent {
-    /// Cancel newest order
     CancelNewest,
-    /// Cancel oldest order
     CancelOldest,
-    /// Cancel both orders
     CancelBoth,
 }
 
@@ -157,7 +145,6 @@ pub enum SelfTradePrevent {
 pub enum AssetClass {
     /// Currency/forex
     Currency,
-    /// Cryptocurrency
     #[serde(alias = "crypto")]
     Cryptocurrency,
 }
@@ -166,31 +153,18 @@ pub enum AssetClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LedgerType {
-    /// Trade execution
     Trade,
-    /// Deposit
     Deposit,
-    /// Withdrawal
     Withdrawal,
-    /// Transfer between accounts
     Transfer,
-    /// Margin trade
     Margin,
-    /// Adjustment
     Adjustment,
-    /// Rollover
     Rollover,
-    /// Credit
     Credit,
-    /// Settled
     Settled,
-    /// Staking
     Staking,
-    /// Dividend
     Dividend,
-    /// Sale
     Sale,
-    /// NFT-related
     #[serde(rename = "nft")]
     Nft,
 }
@@ -201,16 +175,13 @@ pub enum VerificationTier {
     /// Starter tier (lowest limits)
     #[default]
     Starter,
-    /// Intermediate tier
     Intermediate,
     /// Pro tier (highest limits)
     Pro,
 }
 
 impl VerificationTier {
-    /// Get the rate limit parameters for this verification tier.
-    ///
-    /// Returns a tuple of (max_counter, decay_rate_per_sec).
+    /// Get the `(max_counter, decay_rate_per_sec)` rate limit parameters for this tier.
     pub fn rate_limit_params(&self) -> (u32, f64) {
         match self {
             VerificationTier::Starter => (15, 0.33),
@@ -224,23 +195,14 @@ impl VerificationTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "u32", try_from = "u32")]
 pub enum OhlcInterval {
-    /// 1 minute
     Min1,
-    /// 5 minutes
     Min5,
-    /// 15 minutes
     Min15,
-    /// 30 minutes
     Min30,
-    /// 1 hour
     Hour1,
-    /// 4 hours
     Hour4,
-    /// 1 day
     Day1,
-    /// 1 week
     Week1,
-    /// 15 days
     Day15,
 }
 

@@ -27,7 +27,7 @@ pub mod public {
 
 /// Private endpoints (authentication required).
 pub mod private {
-    // Account endpoints
+    // Account endpoints.
     /// Get account balance.
     pub const BALANCE: &str = "/0/private/Balance";
     /// Get extended balance.
@@ -55,7 +55,7 @@ pub mod private {
     /// Get trade volume.
     pub const TRADE_VOLUME: &str = "/0/private/TradeVolume";
 
-    // Export endpoints
+    // Export endpoints.
     /// Request export report.
     pub const ADD_EXPORT: &str = "/0/private/AddExport";
     /// Get export status.
@@ -65,7 +65,7 @@ pub mod private {
     /// Remove export report.
     pub const REMOVE_EXPORT: &str = "/0/private/RemoveExport";
 
-    // Trading endpoints
+    // Trading endpoints.
     /// Add order.
     pub const ADD_ORDER: &str = "/0/private/AddOrder";
     /// Add order batch.
@@ -83,7 +83,7 @@ pub mod private {
     /// Cancel order batch.
     pub const CANCEL_ORDER_BATCH: &str = "/0/private/CancelOrderBatch";
 
-    // Funding endpoints
+    // Funding endpoints.
     /// Get deposit methods.
     pub const DEPOSIT_METHODS: &str = "/0/private/DepositMethods";
     /// Get deposit addresses.
@@ -105,13 +105,13 @@ pub mod private {
     /// Wallet transfer.
     pub const WALLET_TRANSFER: &str = "/0/private/WalletTransfer";
 
-    // Sub-account endpoints
+    // Sub-account endpoints.
     /// Create sub-account.
     pub const CREATE_SUBACCOUNT: &str = "/0/private/CreateSubaccount";
     /// Account transfer.
     pub const ACCOUNT_TRANSFER: &str = "/0/private/AccountTransfer";
 
-    // Earn endpoints
+    // Earn endpoints.
     /// Allocate earn funds.
     pub const EARN_ALLOCATE: &str = "/0/private/Earn/Allocate";
     /// Deallocate earn funds.
@@ -125,7 +125,7 @@ pub mod private {
     /// List earn allocations.
     pub const EARN_ALLOCATIONS: &str = "/0/private/Earn/Allocations";
 
-    // WebSocket token
+    // WebSocket token.
     /// Get WebSocket authentication token.
     pub const GET_WEBSOCKETS_TOKEN: &str = "/0/private/GetWebSocketsToken";
 }
