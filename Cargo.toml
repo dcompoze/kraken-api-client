@@ -3,7 +3,6 @@ categories = ["api-bindings", "asynchronous", "finance"]
 description = "An async Rust client library for the Kraken exchange REST and WebSocket v2 APIs"
 documentation = "https://docs.rs/kraken-api-client"
 edition = "2024"
-exclude = [".archive/*", "target/*", "third-party/*", ".env"]
 keywords = ["kraken", "crypto", "trading", "async", "tokio"]
 license = "MIT"
 name = "kraken-api-client"
