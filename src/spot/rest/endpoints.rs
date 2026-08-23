@@ -26,7 +26,6 @@ pub mod public {
 }
 
 /// Private endpoints (authentication required).
-#[allow(dead_code)]
 pub mod private {
     // Account endpoints
     /// Get account balance.

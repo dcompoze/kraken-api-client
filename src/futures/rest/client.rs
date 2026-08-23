@@ -83,12 +83,28 @@ impl FuturesRestClient {
 
     // HTTP request methods.
 
+    /// Build the full URL for an endpoint.
+    ///
+    /// Chart and history endpoints are served from the domain root instead of
+    /// the `/derivatives` prefix, so the prefix is stripped from the base URL
+    /// for those paths.
+    fn endpoint_url(&self, endpoint: &str) -> String {
+        let base = if endpoint.starts_with("/api/charts") || endpoint.starts_with("/api/history") {
+            self.base_url
+                .strip_suffix("/derivatives")
+                .unwrap_or(&self.base_url)
+        } else {
+            &self.base_url
+        };
+        format!("{}{}", base, endpoint)
+    }
+
     /// Make a public GET request.
     pub(crate) async fn public_get<T>(&self, endpoint: &str) -> Result<T, KrakenError>
     where
         T: serde::de::DeserializeOwned,
     {
-        let url = format!("{}{}", self.base_url, endpoint);
+        let url = self.endpoint_url(endpoint);
         let response = self.http_client.get(&url).send().await?;
         self.parse_futures_response(response).await
     }
@@ -106,9 +122,9 @@ impl FuturesRestClient {
         let query_string = serde_urlencoded::to_string(params)
             .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
         let url = if query_string.is_empty() {
-            format!("{}{}", self.base_url, endpoint)
+            self.endpoint_url(endpoint)
         } else {
-            format!("{}{}?{}", self.base_url, endpoint, query_string)
+            format!("{}?{}", self.endpoint_url(endpoint), query_string)
         };
         let response = self.http_client.get(&url).send().await?;
         self.parse_futures_response(response).await
@@ -130,10 +146,95 @@ impl FuturesRestClient {
         // Sign the request (empty post_data for GET).
         let signature = sign_futures_request(creds, endpoint, nonce, "")?;
 
-        let url = format!("{}{}", self.base_url, endpoint);
+        let url = self.endpoint_url(endpoint);
         let response = self
             .http_client
             .get(&url)
+            .header("APIKey", &creds.api_key)
+            .header("Authent", signature)
+            .header("Nonce", nonce.to_string())
+            .send()
+            .await?;
+
+        self.parse_futures_response(response).await
+    }
+
+    /// Make an authenticated GET request with query parameters.
+    ///
+    /// The query string takes the place of the POST body in the signature.
+    pub(crate) async fn private_get_with_params<T, Q>(
+        &self,
+        endpoint: &str,
+        params: &Q,
+    ) -> Result<T, KrakenError>
+    where
+        T: serde::de::DeserializeOwned,
+        Q: serde::Serialize + ?Sized,
+    {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KrakenError::MissingCredentials)?;
+
+        let nonce = self.nonce_provider.next_nonce();
+        let creds = credentials.get_credentials();
+
+        let query_string = serde_urlencoded::to_string(params)
+            .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
+
+        let signature = sign_futures_request(creds, endpoint, nonce, &query_string)?;
+
+        let url = if query_string.is_empty() {
+            self.endpoint_url(endpoint)
+        } else {
+            format!("{}?{}", self.endpoint_url(endpoint), query_string)
+        };
+        let response = self
+            .http_client
+            .get(&url)
+            .header("APIKey", &creds.api_key)
+            .header("Authent", signature)
+            .header("Nonce", nonce.to_string())
+            .send()
+            .await?;
+
+        self.parse_futures_response(response).await
+    }
+
+    /// Make an authenticated PUT request.
+    ///
+    /// The Futures API expects PUT parameters in the query string.
+    /// The encoded parameters take the place of the POST body in the signature.
+    pub(crate) async fn private_put<T, P>(
+        &self,
+        endpoint: &str,
+        params: &P,
+    ) -> Result<T, KrakenError>
+    where
+        T: serde::de::DeserializeOwned,
+        P: serde::Serialize,
+    {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KrakenError::MissingCredentials)?;
+
+        let nonce = self.nonce_provider.next_nonce();
+        let creds = credentials.get_credentials();
+
+        let query_string = serde_urlencoded::to_string(params)
+            .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
+
+        let signature = sign_futures_request(creds, endpoint, nonce, &query_string)?;
+
+        let url = if query_string.is_empty() {
+            self.endpoint_url(endpoint)
+        } else {
+            format!("{}?{}", self.endpoint_url(endpoint), query_string)
+        };
+        let response = self
+            .http_client
+            .put(&url)
             .header("APIKey", &creds.api_key)
             .header("Authent", signature)
             .header("Nonce", nonce.to_string())
@@ -168,7 +269,7 @@ impl FuturesRestClient {
         // Sign the request using the Futures algorithm.
         let signature = sign_futures_request(creds, endpoint, nonce, &form_data)?;
 
-        let url = format!("{}{}", self.base_url, endpoint);
+        let url = self.endpoint_url(endpoint);
         let response = self
             .http_client
             .post(&url)
@@ -284,6 +385,68 @@ impl FuturesRestClient {
     pub async fn get_instruments(&self) -> Result<Vec<FuturesInstrument>, KrakenError> {
         let response: InstrumentsResponse = self.public_get(public::INSTRUMENTS).await?;
         Ok(response.instruments)
+    }
+
+    /// Get fee schedules.
+    ///
+    /// Returns all fee schedules with their tiers.
+    pub async fn get_fee_schedules(&self) -> Result<Vec<FeeSchedule>, KrakenError> {
+        let response: FeeSchedulesResponse = self.public_get(public::FEE_SCHEDULES).await?;
+        Ok(response.fee_schedules)
+    }
+
+    /// Get historical funding rates for a symbol.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
+    pub async fn get_historical_funding_rates(
+        &self,
+        symbol: &str,
+    ) -> Result<Vec<FundingRateEntry>, KrakenError> {
+        #[derive(serde::Serialize)]
+        struct Params<'a> {
+            symbol: &'a str,
+        }
+        let response: HistoricalFundingRatesResponse = self
+            .public_get_with_params(public::HISTORICAL_FUNDING_RATES, &Params { symbol })
+            .await?;
+        Ok(response.rates)
+    }
+
+    /// Get OHLC candles for a symbol.
+    ///
+    /// # Arguments
+    ///
+    /// * `tick_type` - The kind of price data (spot, mark, or trade)
+    /// * `symbol` - The futures symbol (e.g., "PI_XBTUSD")
+    /// * `resolution` - The candle resolution (e.g., "1m", "1h", "1d")
+    /// * `from` - Optional start time in epoch seconds
+    /// * `to` - Optional end time in epoch seconds (inclusive)
+    pub async fn get_ohlc(
+        &self,
+        tick_type: TickType,
+        symbol: &str,
+        resolution: &str,
+        from: Option<u64>,
+        to: Option<u64>,
+    ) -> Result<OhlcResponse, KrakenError> {
+        #[derive(serde::Serialize)]
+        struct Params {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            from: Option<u64>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            to: Option<u64>,
+        }
+        let endpoint = format!(
+            "{}/{}/{}/{}",
+            public::CHARTS,
+            tick_type.as_str(),
+            symbol,
+            resolution
+        );
+        self.public_get_with_params(&endpoint, &Params { from, to })
+            .await
     }
 
     // Private endpoints: account.
@@ -448,6 +611,186 @@ impl FuturesRestClient {
         request: &BatchOrderRequest,
     ) -> Result<BatchOrderResponse, KrakenError> {
         self.private_post(private::BATCH_ORDER, request).await
+    }
+
+    /// Get the status of orders by order ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `order_ids` - The order IDs to query
+    pub async fn get_orders_status(
+        &self,
+        order_ids: &[&str],
+    ) -> Result<OrdersStatusResponse, KrakenError> {
+        let params: Vec<(&str, &str)> = order_ids.iter().map(|id| ("orderIds", *id)).collect();
+        self.private_post(private::ORDERS_STATUS, &params).await
+    }
+
+    /// Get the status of orders by client order ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `cli_ord_ids` - The client order IDs to query
+    pub async fn get_orders_status_by_cli_ord_ids(
+        &self,
+        cli_ord_ids: &[&str],
+    ) -> Result<OrdersStatusResponse, KrakenError> {
+        let params: Vec<(&str, &str)> = cli_ord_ids.iter().map(|id| ("cliOrdIds", *id)).collect();
+        self.private_post(private::ORDERS_STATUS, &params).await
+    }
+
+    // Private endpoints: transfers and withdrawals.
+
+    /// Transfer funds between margin accounts.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Transfer parameters
+    pub async fn transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> Result<FuturesResultResponse, KrakenError> {
+        self.private_post(private::TRANSFER, request).await
+    }
+
+    /// Transfer funds between the main account and a subaccount.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Transfer parameters
+    pub async fn sub_account_transfer(
+        &self,
+        request: &SubAccountTransferRequest,
+    ) -> Result<FuturesResultResponse, KrakenError> {
+        self.private_post(private::TRANSFER_SUBACCOUNT, request)
+            .await
+    }
+
+    /// Withdraw funds from the futures wallet to the spot wallet.
+    ///
+    /// This endpoint is not available in the demo environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Withdrawal parameters
+    pub async fn withdrawal_to_spot_wallet(
+        &self,
+        request: &WithdrawalRequest,
+    ) -> Result<FuturesResultResponse, KrakenError> {
+        self.private_post(private::WITHDRAWAL, request).await
+    }
+
+    // Private endpoints: history and settings.
+
+    /// Get account log entries.
+    ///
+    /// This endpoint is not available in the demo environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Optional pagination and filter parameters
+    pub async fn get_account_log(
+        &self,
+        request: Option<&AccountLogRequest>,
+    ) -> Result<AccountLogResponse, KrakenError> {
+        match request {
+            Some(req) => {
+                self.private_get_with_params(private::ACCOUNT_LOG, req)
+                    .await
+            }
+            None => self.private_get(private::ACCOUNT_LOG).await,
+        }
+    }
+
+    /// Get the latest notifications.
+    pub async fn get_notifications(&self) -> Result<Vec<FuturesNotification>, KrakenError> {
+        let response: NotificationsResponse = self.private_get(private::NOTIFICATIONS).await?;
+        Ok(response.notifications)
+    }
+
+    /// Get personal volumes per fee schedule.
+    ///
+    /// Returns the 30 day USD volume keyed by fee schedule UID.
+    pub async fn get_fee_schedule_volumes(
+        &self,
+    ) -> Result<FeeScheduleVolumesResponse, KrakenError> {
+        self.private_get(private::FEE_SCHEDULE_VOLUMES).await
+    }
+
+    /// Get the percentile of open interest in the unwind queue.
+    pub async fn get_unwind_queue(&self) -> Result<Vec<UnwindQueueEntry>, KrakenError> {
+        let response: UnwindQueueResponse = self.private_get(private::UNWIND_QUEUE).await?;
+        Ok(response.queue)
+    }
+
+    /// Get leverage preferences.
+    ///
+    /// Returns the maximum leverage per symbol.
+    pub async fn get_leverage_preferences(&self) -> Result<Vec<LeveragePreference>, KrakenError> {
+        let response: LeveragePreferencesResponse =
+            self.private_get(private::LEVERAGE_PREFERENCES).await?;
+        Ok(response.leverage_preferences)
+    }
+
+    /// Set the leverage preference for a symbol.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - The futures symbol (e.g., "PF_XBTUSD")
+    /// * `max_leverage` - The maximum leverage, or None to reset to default
+    pub async fn set_leverage_preference(
+        &self,
+        symbol: &str,
+        max_leverage: Option<rust_decimal::Decimal>,
+    ) -> Result<FuturesResultResponse, KrakenError> {
+        #[derive(serde::Serialize)]
+        struct Params<'a> {
+            symbol: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            #[serde(rename = "maxLeverage")]
+            max_leverage: Option<rust_decimal::Decimal>,
+        }
+        self.private_put(
+            private::LEVERAGE_PREFERENCES,
+            &Params {
+                symbol,
+                max_leverage,
+            },
+        )
+        .await
+    }
+
+    /// Get PnL currency preferences.
+    pub async fn get_pnl_preferences(&self) -> Result<Vec<PnlPreference>, KrakenError> {
+        let response: PnlPreferencesResponse = self.private_get(private::PNL_PREFERENCES).await?;
+        Ok(response.preferences)
+    }
+
+    /// Set the PnL currency preference for a symbol.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - The futures symbol (e.g., "PF_XBTUSD")
+    /// * `pnl_preference` - The currency in which profits and losses are realized
+    pub async fn set_pnl_preference(
+        &self,
+        symbol: &str,
+        pnl_preference: &str,
+    ) -> Result<FuturesResultResponse, KrakenError> {
+        #[derive(serde::Serialize)]
+        struct Params<'a> {
+            symbol: &'a str,
+            #[serde(rename = "pnlPreference")]
+            pnl_preference: &'a str,
+        }
+        self.private_put(
+            private::PNL_PREFERENCES,
+            &Params {
+                symbol,
+                pnl_preference,
+            },
+        )
+        .await
     }
 }
 

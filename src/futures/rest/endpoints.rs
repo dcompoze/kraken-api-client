@@ -19,6 +19,16 @@ pub mod public {
 
     /// Get available instruments.
     pub const INSTRUMENTS: &str = "/api/v3/instruments";
+
+    /// Get fee schedules.
+    pub const FEE_SCHEDULES: &str = "/api/v3/feeschedules";
+
+    /// Get historical funding rates.
+    pub const HISTORICAL_FUNDING_RATES: &str = "/api/v4/historicalfundingrates";
+
+    /// Base path for OHLC chart data.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const CHARTS: &str = "/api/charts/v1";
 }
 
 /// Private endpoints (authentication required).
@@ -52,4 +62,35 @@ pub mod private {
 
     /// Batch order operations.
     pub const BATCH_ORDER: &str = "/api/v3/batchorder";
+
+    /// Get the status of orders by order ID or client order ID.
+    pub const ORDERS_STATUS: &str = "/api/v3/orders/status";
+
+    /// Transfer funds between margin accounts.
+    pub const TRANSFER: &str = "/api/v3/transfer";
+
+    /// Transfer funds between the main account and a subaccount.
+    pub const TRANSFER_SUBACCOUNT: &str = "/api/v3/transfer/subaccount";
+
+    /// Withdraw funds from the futures wallet to the spot wallet.
+    pub const WITHDRAWAL: &str = "/api/v3/withdrawal";
+
+    /// Get account log entries.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const ACCOUNT_LOG: &str = "/api/history/v2/account-log";
+
+    /// Get the latest notifications.
+    pub const NOTIFICATIONS: &str = "/api/v3/notifications";
+
+    /// Get personal volumes per fee schedule.
+    pub const FEE_SCHEDULE_VOLUMES: &str = "/api/v3/feeschedules/volumes";
+
+    /// Get the percentile of open interest in the unwind queue.
+    pub const UNWIND_QUEUE: &str = "/api/v3/unwindqueue";
+
+    /// Get or set leverage preferences.
+    pub const LEVERAGE_PREFERENCES: &str = "/api/v3/leveragepreferences";
+
+    /// Get or set PnL currency preferences.
+    pub const PNL_PREFERENCES: &str = "/api/v3/pnlpreferences";
 }

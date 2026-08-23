@@ -10,7 +10,7 @@ name = "kraken-api-client"
 readme = "README.md"
 repository = "https://github.com/dcompoze/kraken-api-client"
 rust-version = "1.85"
-version = "0.1.0"
+version = "1.0.0"
 
 [lib]
 name = "kraken_api_client"
@@ -18,13 +18,13 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.22"
+crc32fast = "1.5.1"
 futures-util = "0.3"
-governor = "0.8"
 hmac = "0.12"
 reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 reqwest-middleware = "0.5"
 reqwest-retry = "0.9"
-reqwest-tracing = "0.6"
+reqwest-tracing = "0.7"
 rust_decimal = { version = "1.39", features = ["serde-with-str"] }
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -36,7 +36,7 @@ thiserror = "2.0"
 time = { version = "0.3", features = ["serde", "macros"] }
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 tracing = "0.1"
 url = "2.5"
 

@@ -32,16 +32,23 @@ use crate::rate_limit::{
     KeyedRateLimiter, OrderTrackingInfo, RateLimitConfig, SlidingWindow, TradingRateLimiter,
 };
 use crate::spot::rest::private::{
-    AddOrderRequest, AddOrderResponse, AllocationStatus, CancelOrderRequest, CancelOrderResponse,
-    ClosedOrders, ClosedOrdersRequest, ConfirmationRefId, DepositAddress, DepositAddressesRequest,
-    DepositMethod, DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
+    AccountTransferRequest, AccountTransferResponse, AddExportRequest, AddExportResponse,
+    AddOrderBatchRequest, AddOrderBatchResponse, AddOrderRequest, AddOrderResponse,
+    AllocationStatus, AmendOrderRequest, AmendOrderResponse, BatchCancelId,
+    CancelAllOrdersAfterRequest, CancelAllOrdersAfterResponse, CancelOrderBatchRequest,
+    CancelOrderRequest, CancelOrderResponse, ClosedOrders, ClosedOrdersRequest, ConfirmationRefId,
+    CreateSubaccountRequest, DepositAddress, DepositAddressesRequest, DepositMethod,
+    DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
     EarnAllocationStatusRequest, EarnAllocateRequest, EarnAllocations, EarnAllocationsRequest,
-    EarnStrategies, EarnStrategiesRequest, ExtendedBalances, LedgersInfo, LedgersRequest,
-    OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, Position, QueryOrdersRequest,
-    TradeBalance, TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory,
-    TradesHistoryRequest, WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest,
-    WithdrawCancelRequest, WithdrawInfo, WithdrawInfoRequest, WithdrawMethod,
-    WithdrawMethodsRequest, WithdrawRequest, WithdrawStatusRequest, WithdrawalAddress,
+    EarnStrategies, EarnStrategiesRequest, EditOrderRequest, EditOrderResponse,
+    ExportReportStatus, ExportStatusRequest, ExtendedBalances, LedgerEntry, LedgersInfo,
+    LedgersRequest, OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, OrderAmends,
+    OrderAmendsRequest, Position, QueryLedgersRequest, QueryOrdersRequest, QueryTradesRequest,
+    RemoveExportRequest, RemoveExportResponse, RetrieveExportRequest, Trade, TradeBalance,
+    TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory, TradesHistoryRequest,
+    WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest, WithdrawCancelRequest,
+    WithdrawInfo, WithdrawInfoRequest, WithdrawMethod, WithdrawMethodsRequest, WithdrawRequest,
+    WithdrawStatusRequest, WithdrawalAddress,
 };
 use crate::spot::rest::public::{
     AssetInfo, AssetInfoRequest, AssetPair, AssetPairsRequest, OhlcRequest, OhlcResponse, OrderBook,
@@ -539,6 +546,78 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.inner.earn_deallocate(request).await
     }
 
+    async fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> Result<HashMap<String, Trade>, KrakenError> {
+        self.wait_private().await?;
+        self.inner.query_trades(request).await
+    }
+
+    async fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> Result<HashMap<String, LedgerEntry>, KrakenError> {
+        self.wait_private().await?;
+        self.inner.query_ledgers(request).await
+    }
+
+    async fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> Result<OrderAmends, KrakenError> {
+        self.wait_private().await?;
+        self.inner.get_order_amends(request).await
+    }
+
+    async fn add_export(
+        &self,
+        request: &AddExportRequest,
+    ) -> Result<AddExportResponse, KrakenError> {
+        self.wait_private().await?;
+        self.inner.add_export(request).await
+    }
+
+    async fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> Result<Vec<ExportReportStatus>, KrakenError> {
+        self.wait_private().await?;
+        self.inner.get_export_status(request).await
+    }
+
+    async fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> Result<Vec<u8>, KrakenError> {
+        self.wait_private().await?;
+        self.inner.retrieve_export(request).await
+    }
+
+    async fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> Result<RemoveExportResponse, KrakenError> {
+        self.wait_private().await?;
+        self.inner.remove_export(request).await
+    }
+
+    async fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> Result<bool, KrakenError> {
+        self.wait_private().await?;
+        self.inner.create_subaccount(request).await
+    }
+
+    async fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> Result<AccountTransferResponse, KrakenError> {
+        self.wait_private().await?;
+        self.inner.account_transfer(request).await
+    }
+
     async fn get_earn_allocation_status(
         &self,
         request: &EarnAllocationStatusRequest,
@@ -584,10 +663,54 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         self.wait_trading_order(&temp_id, &request.pair).await?;
         let result = self.inner.add_order(request).await?;
 
-        // Update the trading limiter with the real order ID
+        // Replace the temporary entry with the real order ID.
+        let mut limiter = self.trading_limiter.lock().await;
+        limiter.order_cancelled(&temp_id);
         if let Some(order_id) = result.txid.as_ref().and_then(|ids| ids.first()) {
-            let mut limiter = self.trading_limiter.lock().await;
             limiter.track_order(order_id.to_string(), OrderTrackingInfo::new(&request.pair));
+        }
+
+        Ok(result)
+    }
+
+    async fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> Result<AddOrderBatchResponse, KrakenError> {
+        self.wait_private().await?;
+        let result = self.inner.add_order_batch(request).await?;
+
+        // Track placed orders so later cancellations get correct age penalties.
+        let mut limiter = self.trading_limiter.lock().await;
+        for order in &result.orders {
+            if let Some(txid) = &order.txid {
+                limiter.track_order(txid.to_string(), OrderTrackingInfo::new(&request.pair));
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> Result<AmendOrderResponse, KrakenError> {
+        self.wait_private().await?;
+        self.inner.amend_order(request).await
+    }
+
+    async fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> Result<EditOrderResponse, KrakenError> {
+        // Editing cancels the original order, so the age-based penalty applies.
+        self.wait_trading_cancel(&request.txid).await?;
+        let result = self.inner.edit_order(request).await?;
+
+        // Track the replacement order.
+        if let Some(txid) = &result.txid {
+            let mut limiter = self.trading_limiter.lock().await;
+            limiter.track_order(txid.to_string(), OrderTrackingInfo::new(&request.pair));
         }
 
         Ok(result)
@@ -606,6 +729,27 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         // Cancel all doesn't track individual orders
         self.wait_private().await?;
         self.inner.cancel_all_orders().await
+    }
+
+    async fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> Result<CancelAllOrdersAfterResponse, KrakenError> {
+        self.wait_private().await?;
+        self.inner.cancel_all_orders_after(request).await
+    }
+
+    async fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
+    ) -> Result<CancelOrderResponse, KrakenError> {
+        // Apply the age-based penalty for each tracked order in the batch.
+        for order in &request.orders {
+            if let BatchCancelId::Txid(txid) = order {
+                self.wait_trading_cancel(txid).await?;
+            }
+        }
+        self.inner.cancel_order_batch(request).await
     }
 
     // ========== Private Endpoints - WebSocket ==========

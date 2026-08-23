@@ -13,16 +13,23 @@ use crate::auth::{CredentialsProvider, IncreasingNonce, NonceProvider, sign_requ
 use crate::error::{ApiError, KrakenError};
 use crate::spot::rest::endpoints::KRAKEN_BASE_URL;
 use crate::spot::rest::private::{
-    AddOrderRequest, AddOrderResponse, AllocationStatus, CancelOrderRequest, CancelOrderResponse,
-    ClosedOrders, ClosedOrdersRequest, ConfirmationRefId, DepositAddress, DepositAddressesRequest,
-    DepositMethod, DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
+    AccountTransferRequest, AccountTransferResponse, AddExportRequest, AddExportResponse,
+    AddOrderBatchRequest, AddOrderBatchResponse, AddOrderRequest, AddOrderResponse,
+    AllocationStatus, AmendOrderRequest, AmendOrderResponse, CancelAllOrdersAfterRequest,
+    CancelAllOrdersAfterResponse, CancelOrderBatchRequest, CancelOrderRequest,
+    CancelOrderResponse, ClosedOrders, ClosedOrdersRequest, ConfirmationRefId,
+    CreateSubaccountRequest, DepositAddress, DepositAddressesRequest, DepositMethod,
+    DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
     EarnAllocateRequest, EarnAllocationStatusRequest, EarnAllocations, EarnAllocationsRequest,
-    EarnStrategies, EarnStrategiesRequest, ExtendedBalances, LedgersInfo, LedgersRequest,
-    OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, Position, QueryOrdersRequest,
-    TradeBalance, TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory,
-    TradesHistoryRequest, WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest,
-    WithdrawCancelRequest, WithdrawInfo, WithdrawInfoRequest, WithdrawMethod,
-    WithdrawMethodsRequest, WithdrawRequest, WithdrawStatusRequest, WithdrawalAddress,
+    EarnStrategies, EarnStrategiesRequest, EditOrderRequest, EditOrderResponse,
+    ExportReportStatus, ExportStatusRequest, ExtendedBalances, LedgerEntry, LedgersInfo,
+    LedgersRequest, OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, OrderAmends,
+    OrderAmendsRequest, Position, QueryLedgersRequest, QueryOrdersRequest, QueryTradesRequest,
+    RemoveExportRequest, RemoveExportResponse, RetrieveExportRequest, Trade, TradeBalance,
+    TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory, TradesHistoryRequest,
+    WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest, WithdrawCancelRequest,
+    WithdrawInfo, WithdrawInfoRequest, WithdrawMethod, WithdrawMethodsRequest, WithdrawRequest,
+    WithdrawStatusRequest, WithdrawalAddress,
 };
 use crate::spot::rest::public::{
     AssetInfo, AssetInfoRequest, AssetPair, AssetPairsRequest, OhlcRequest, OhlcResponse,
@@ -170,6 +177,121 @@ impl SpotRestClient {
             .await?;
 
         self.parse_response(response).await
+    }
+
+    /// Make an authenticated POST request with a JSON body.
+    ///
+    /// Some endpoints such as `AddOrderBatch` and `AmendOrder` require a JSON
+    /// request body instead of form encoding.
+    pub(crate) async fn private_post_json<T, P>(
+        &self,
+        endpoint: &str,
+        params: &P,
+    ) -> Result<T, KrakenError>
+    where
+        T: serde::de::DeserializeOwned,
+        P: serde::Serialize,
+    {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KrakenError::MissingCredentials)?;
+
+        let nonce = self.nonce_provider.next_nonce();
+        let creds = credentials.get_credentials();
+
+        // Build the JSON body with the nonce injected at the top level.
+        let mut value = serde_json::to_value(params)
+            .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
+        match value.as_object_mut() {
+            Some(object) => {
+                object.insert("nonce".to_string(), serde_json::Value::from(nonce));
+            }
+            None => {
+                return Err(KrakenError::InvalidResponse(
+                    "JSON request body must be an object".to_string(),
+                ));
+            }
+        }
+        let body = serde_json::to_string(&value)
+            .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
+
+        // Sign the request.
+        let signature = sign_request(creds, endpoint, nonce, &body)?;
+
+        let url = format!("{}{}", self.base_url, endpoint);
+        let response = self
+            .http_client
+            .post(&url)
+            .header("API-Key", &creds.api_key)
+            .header("API-Sign", signature)
+            .header(CONTENT_TYPE, "application/json")
+            .body(body)
+            .send()
+            .await?;
+
+        self.parse_response(response).await
+    }
+
+    /// Make an authenticated POST request that returns raw bytes.
+    ///
+    /// Used by `RetrieveExport` which returns binary report data.
+    /// If the response is a Kraken JSON error, it is parsed and returned as an error.
+    pub(crate) async fn private_post_binary<P>(
+        &self,
+        endpoint: &str,
+        params: &P,
+    ) -> Result<Vec<u8>, KrakenError>
+    where
+        P: serde::Serialize,
+    {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KrakenError::MissingCredentials)?;
+
+        let nonce = self.nonce_provider.next_nonce();
+        let creds = credentials.get_credentials();
+
+        let mut form_data = serde_urlencoded::to_string(params)
+            .map_err(|e| KrakenError::InvalidResponse(e.to_string()))?;
+
+        if form_data.is_empty() {
+            form_data = format!("nonce={}", nonce);
+        } else {
+            form_data = format!("nonce={}&{}", nonce, form_data);
+        }
+
+        let signature = sign_request(creds, endpoint, nonce, &form_data)?;
+
+        let url = format!("{}{}", self.base_url, endpoint);
+        let response = self
+            .http_client
+            .post(&url)
+            .header("API-Key", &creds.api_key)
+            .header("API-Sign", signature)
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(form_data)
+            .send()
+            .await?;
+
+        let bytes = response.bytes().await?.to_vec();
+
+        // An error response comes back as the usual JSON envelope.
+        if let Ok(parsed) = serde_json::from_slice::<KrakenResponse<serde_json::Value>>(&bytes) {
+            if !parsed.error.is_empty() {
+                if let Some(api_error) = ApiError::from_error_array(&parsed.error) {
+                    if api_error.is_rate_limit() {
+                        return Err(KrakenError::RateLimitExceeded {
+                            retry_after_ms: None,
+                        });
+                    }
+                    return Err(KrakenError::Api(api_error));
+                }
+            }
+        }
+
+        Ok(bytes)
     }
 
     /// Parse a response from the Kraken API.
@@ -446,6 +568,69 @@ impl KrakenClient for SpotRestClient {
         SpotRestClient::get_trade_volume(self, request).await
     }
 
+    async fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> Result<HashMap<String, Trade>, KrakenError> {
+        SpotRestClient::query_trades(self, request).await
+    }
+
+    async fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> Result<HashMap<String, LedgerEntry>, KrakenError> {
+        SpotRestClient::query_ledgers(self, request).await
+    }
+
+    async fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> Result<OrderAmends, KrakenError> {
+        SpotRestClient::get_order_amends(self, request).await
+    }
+
+    async fn add_export(
+        &self,
+        request: &AddExportRequest,
+    ) -> Result<AddExportResponse, KrakenError> {
+        SpotRestClient::add_export(self, request).await
+    }
+
+    async fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> Result<Vec<ExportReportStatus>, KrakenError> {
+        SpotRestClient::get_export_status(self, request).await
+    }
+
+    async fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> Result<Vec<u8>, KrakenError> {
+        SpotRestClient::retrieve_export(self, request).await
+    }
+
+    async fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> Result<RemoveExportResponse, KrakenError> {
+        SpotRestClient::remove_export(self, request).await
+    }
+
+    async fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> Result<bool, KrakenError> {
+        SpotRestClient::create_subaccount(self, request).await
+    }
+
+    async fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> Result<AccountTransferResponse, KrakenError> {
+        SpotRestClient::account_transfer(self, request).await
+    }
+
     async fn get_deposit_methods(
         &self,
         request: &DepositMethodsRequest,
@@ -555,6 +740,27 @@ impl KrakenClient for SpotRestClient {
         SpotRestClient::add_order(self, request).await
     }
 
+    async fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> Result<AddOrderBatchResponse, KrakenError> {
+        SpotRestClient::add_order_batch(self, request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> Result<AmendOrderResponse, KrakenError> {
+        SpotRestClient::amend_order(self, request).await
+    }
+
+    async fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> Result<EditOrderResponse, KrakenError> {
+        SpotRestClient::edit_order(self, request).await
+    }
+
     async fn cancel_order(
         &self,
         request: &CancelOrderRequest,
@@ -564,6 +770,20 @@ impl KrakenClient for SpotRestClient {
 
     async fn cancel_all_orders(&self) -> Result<CancelOrderResponse, KrakenError> {
         SpotRestClient::cancel_all_orders(self).await
+    }
+
+    async fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> Result<CancelAllOrdersAfterResponse, KrakenError> {
+        SpotRestClient::cancel_all_orders_after(self, request).await
+    }
+
+    async fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
+    ) -> Result<CancelOrderResponse, KrakenError> {
+        SpotRestClient::cancel_order_batch(self, request).await
     }
 
     // ========== Private Endpoints - WebSocket ==========

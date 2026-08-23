@@ -28,15 +28,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Spot private REST client with environment credentials:
 
 ```rust
-use kraken_api_client::auth::credentials::EnvCredentials;
+use std::sync::Arc;
+
+use kraken_api_client::auth::EnvCredentials;
 use kraken_api_client::spot::rest::SpotRestClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let creds = EnvCredentials::new("KRAKEN_API_KEY", "KRAKEN_API_SECRET");
-    let client = SpotRestClient::with_credentials(creds)?;
+    let creds = Arc::new(EnvCredentials::from_env());
+    let client = SpotRestClient::builder().credentials(creds).build();
 
-    let balances = client.get_account_balances().await?;
+    let balances = client.get_account_balance().await?;
     println!("Balances: {:?}", balances);
     Ok(())
 }

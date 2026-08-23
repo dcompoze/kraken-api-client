@@ -164,6 +164,83 @@ impl SpotRestClient {
         }
     }
 
+    /// Query specific trades by transaction ID.
+    pub async fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> Result<std::collections::HashMap<String, Trade>, KrakenError> {
+        self.private_post(private::QUERY_TRADES, request).await
+    }
+
+    /// Query specific ledger entries by ID.
+    pub async fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> Result<std::collections::HashMap<String, LedgerEntry>, KrakenError> {
+        self.private_post(private::QUERY_LEDGERS, request).await
+    }
+
+    /// Get the amend history of an order.
+    pub async fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> Result<OrderAmends, KrakenError> {
+        self.private_post_json(private::ORDER_AMENDS, request).await
+    }
+
+    // ========== Export Endpoints ==========
+
+    /// Request generation of an export report.
+    pub async fn add_export(
+        &self,
+        request: &AddExportRequest,
+    ) -> Result<AddExportResponse, KrakenError> {
+        self.private_post(private::ADD_EXPORT, request).await
+    }
+
+    /// Get the status of requested export reports.
+    pub async fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> Result<Vec<ExportReportStatus>, KrakenError> {
+        self.private_post(private::EXPORT_STATUS, request).await
+    }
+
+    /// Retrieve a generated export report as raw bytes (zip archive).
+    pub async fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> Result<Vec<u8>, KrakenError> {
+        self.private_post_binary(private::RETRIEVE_EXPORT, request)
+            .await
+    }
+
+    /// Cancel or delete an export report.
+    pub async fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> Result<RemoveExportResponse, KrakenError> {
+        self.private_post(private::REMOVE_EXPORT, request).await
+    }
+
+    // ========== Subaccount Endpoints ==========
+
+    /// Create a trading subaccount.
+    pub async fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> Result<bool, KrakenError> {
+        self.private_post(private::CREATE_SUBACCOUNT, request).await
+    }
+
+    /// Transfer funds between master and subaccounts.
+    pub async fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> Result<AccountTransferResponse, KrakenError> {
+        self.private_post(private::ACCOUNT_TRANSFER, request).await
+    }
+
     // ========== Funding Endpoints ==========
 
     /// Get available deposit methods for an asset.
@@ -378,6 +455,35 @@ impl SpotRestClient {
         self.private_post(private::ADD_ORDER, request).await
     }
 
+    /// Place multiple orders in a single batch (up to 15).
+    pub async fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> Result<AddOrderBatchResponse, KrakenError> {
+        self.private_post_json(private::ADD_ORDER_BATCH, request)
+            .await
+    }
+
+    /// Amend an existing order in place.
+    ///
+    /// Unlike editing, amending keeps the order's txid and queue priority.
+    pub async fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> Result<AmendOrderResponse, KrakenError> {
+        self.private_post_json(private::AMEND_ORDER, request).await
+    }
+
+    /// Edit an existing order.
+    ///
+    /// Editing cancels the original order and creates a new one with a new txid.
+    pub async fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> Result<EditOrderResponse, KrakenError> {
+        self.private_post(private::EDIT_ORDER, request).await
+    }
+
     /// Cancel an order.
     pub async fn cancel_order(
         &self,
@@ -391,6 +497,27 @@ impl SpotRestClient {
         #[derive(serde::Serialize)]
         struct Empty {}
         self.private_post(private::CANCEL_ALL, &Empty {}).await
+    }
+
+    /// Cancel all orders after a timeout (dead man's switch).
+    ///
+    /// The timer must be refreshed by calling this endpoint again before it expires.
+    /// A timeout of 0 disables the timer.
+    pub async fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> Result<CancelAllOrdersAfterResponse, KrakenError> {
+        self.private_post(private::CANCEL_ALL_ORDERS_AFTER, request)
+            .await
+    }
+
+    /// Cancel multiple orders in a single batch (up to 50).
+    pub async fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
+    ) -> Result<CancelOrderResponse, KrakenError> {
+        self.private_post_json(private::CANCEL_ORDER_BATCH, request)
+            .await
     }
 
     /// Get a WebSocket authentication token.

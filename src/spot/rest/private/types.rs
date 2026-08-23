@@ -1432,3 +1432,798 @@ pub struct EarnAmount {
     /// Native amount.
     pub native: Decimal,
 }
+
+// Query endpoints
+
+/// Request to query trades by transaction ID.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryTradesRequest {
+    /// Comma-separated list of transaction IDs (up to 20).
+    pub txid: String,
+    /// Include trades related to position in output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trades: Option<bool>,
+}
+
+impl QueryTradesRequest {
+    /// Create a new query trades request.
+    pub fn new(txid: impl Into<String>) -> Self {
+        Self {
+            txid: txid.into(),
+            trades: None,
+        }
+    }
+
+    /// Include trades related to position.
+    pub fn trades(mut self, trades: bool) -> Self {
+        self.trades = Some(trades);
+        self
+    }
+}
+
+/// Request to query ledger entries by ID.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryLedgersRequest {
+    /// Comma-separated list of ledger IDs (up to 20).
+    pub id: String,
+    /// Include trades related to position in output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trades: Option<bool>,
+}
+
+impl QueryLedgersRequest {
+    /// Create a new query ledgers request.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            trades: None,
+        }
+    }
+
+    /// Include trades related to position.
+    pub fn trades(mut self, trades: bool) -> Self {
+        self.trades = Some(trades);
+        self
+    }
+}
+
+/// Request for the amend history of an order.
+#[derive(Debug, Clone, Serialize)]
+pub struct OrderAmendsRequest {
+    /// Order ID (txid).
+    pub order_id: String,
+}
+
+impl OrderAmendsRequest {
+    /// Create a new order amends request.
+    pub fn new(order_id: impl Into<String>) -> Self {
+        Self {
+            order_id: order_id.into(),
+        }
+    }
+}
+
+/// Type of an order amendment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AmendType {
+    /// Original order values.
+    Original,
+    /// Amendment requested by the user.
+    User,
+    /// Amendment restated by the engine.
+    Restated,
+}
+
+/// A single order amendment record.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderAmend {
+    /// Amend ID.
+    pub amend_id: String,
+    /// Type of amendment.
+    pub amend_type: AmendType,
+    /// Order quantity.
+    pub order_qty: Decimal,
+    /// Display quantity for iceberg orders.
+    #[serde(default)]
+    pub display_qty: Option<Decimal>,
+    /// Remaining quantity.
+    #[serde(default)]
+    pub remaining_qty: Option<Decimal>,
+    /// Limit price.
+    #[serde(default)]
+    pub limit_price: Option<Decimal>,
+    /// Trigger price.
+    #[serde(default)]
+    pub trigger_price: Option<Decimal>,
+    /// Reason for the amendment.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Post-only flag.
+    #[serde(default)]
+    pub post_only: Option<bool>,
+    /// Timestamp in milliseconds.
+    pub timestamp: u64,
+}
+
+/// Order amends response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderAmends {
+    /// Amendment records.
+    pub amends: Vec<OrderAmend>,
+    /// Total count of amendments.
+    pub count: u32,
+}
+
+// Trading endpoints
+
+/// Request to edit an existing order.
+///
+/// Editing cancels the original order and creates a new one with a new txid.
+#[derive(Debug, Clone, Serialize)]
+pub struct EditOrderRequest {
+    /// Transaction ID of the order to edit.
+    pub txid: String,
+    /// Asset pair.
+    pub pair: String,
+    /// New order volume.
+    pub volume: Decimal,
+    /// Display volume for iceberg orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub displayvol: Option<Decimal>,
+    /// New price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<Decimal>,
+    /// New secondary price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price2: Option<Decimal>,
+    /// Order flags (comma-separated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oflags: Option<String>,
+    /// New user reference ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub userref: Option<i64>,
+    /// Deadline in RFC 3339 format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
+    /// Return a cancel response instead of a full edit response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_response: Option<bool>,
+    /// Validate only (don't submit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validate: Option<bool>,
+}
+
+impl EditOrderRequest {
+    /// Create a new edit order request.
+    pub fn new(txid: impl Into<String>, pair: impl Into<String>, volume: Decimal) -> Self {
+        Self {
+            txid: txid.into(),
+            pair: pair.into(),
+            volume,
+            displayvol: None,
+            price: None,
+            price2: None,
+            oflags: None,
+            userref: None,
+            deadline: None,
+            cancel_response: None,
+            validate: None,
+        }
+    }
+
+    /// Set the price.
+    pub fn price(mut self, price: Decimal) -> Self {
+        self.price = Some(price);
+        self
+    }
+
+    /// Set the secondary price.
+    pub fn price2(mut self, price2: Decimal) -> Self {
+        self.price2 = Some(price2);
+        self
+    }
+
+    /// Set as validate only.
+    pub fn validate(mut self, validate: bool) -> Self {
+        self.validate = Some(validate);
+        self
+    }
+}
+
+/// Status of an edit order request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EditOrderStatus {
+    /// Edit succeeded.
+    Ok,
+    /// Edit failed.
+    Err,
+}
+
+/// Edit order response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EditOrderResponse {
+    /// Edit status.
+    pub status: EditOrderStatus,
+    /// New transaction ID.
+    #[serde(default)]
+    pub txid: Option<String>,
+    /// Original transaction ID.
+    #[serde(default)]
+    pub originaltxid: Option<String>,
+    /// New order volume.
+    #[serde(default)]
+    pub volume: Option<Decimal>,
+    /// New order price.
+    #[serde(default)]
+    pub price: Option<Decimal>,
+    /// New secondary price.
+    #[serde(default)]
+    pub price2: Option<Decimal>,
+    /// Number of orders cancelled.
+    #[serde(default)]
+    pub orders_cancelled: Option<i64>,
+    /// Order description.
+    #[serde(default)]
+    pub descr: Option<AddOrderDescription>,
+    /// Error message if the edit failed.
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+/// Request to amend an existing order in place.
+///
+/// Unlike editing, amending keeps the order's txid and queue priority.
+#[derive(Debug, Clone, Serialize)]
+pub struct AmendOrderRequest {
+    /// Transaction ID of the order to amend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub txid: Option<String>,
+    /// Client order ID of the order to amend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cl_ord_id: Option<String>,
+    /// New order quantity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_qty: Option<Decimal>,
+    /// New display quantity for iceberg orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_qty: Option<Decimal>,
+    /// New limit price.
+    ///
+    /// Accepts absolute prices and relative prices such as `+5`, `-2.5`, or `#0.1`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_price: Option<String>,
+    /// New trigger price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_price: Option<String>,
+    /// Post-only flag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_only: Option<bool>,
+    /// Deadline in RFC 3339 format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
+}
+
+impl AmendOrderRequest {
+    /// Create an amend request for an order identified by transaction ID.
+    pub fn by_txid(txid: impl Into<String>) -> Self {
+        Self {
+            txid: Some(txid.into()),
+            cl_ord_id: None,
+            order_qty: None,
+            display_qty: None,
+            limit_price: None,
+            trigger_price: None,
+            post_only: None,
+            deadline: None,
+        }
+    }
+
+    /// Create an amend request for an order identified by client order ID.
+    pub fn by_client_order_id(cl_ord_id: impl Into<String>) -> Self {
+        Self {
+            txid: None,
+            cl_ord_id: Some(cl_ord_id.into()),
+            order_qty: None,
+            display_qty: None,
+            limit_price: None,
+            trigger_price: None,
+            post_only: None,
+            deadline: None,
+        }
+    }
+
+    /// Set the new order quantity.
+    pub fn order_qty(mut self, qty: Decimal) -> Self {
+        self.order_qty = Some(qty);
+        self
+    }
+
+    /// Set the new limit price.
+    pub fn limit_price(mut self, price: impl Into<String>) -> Self {
+        self.limit_price = Some(price.into());
+        self
+    }
+
+    /// Set the new trigger price.
+    pub fn trigger_price(mut self, price: impl Into<String>) -> Self {
+        self.trigger_price = Some(price.into());
+        self
+    }
+
+    /// Set the post-only flag.
+    pub fn post_only(mut self, post_only: bool) -> Self {
+        self.post_only = Some(post_only);
+        self
+    }
+}
+
+/// Amend order response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AmendOrderResponse {
+    /// Amend ID.
+    pub amend_id: String,
+}
+
+/// A single order within a batch order request.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchOrder {
+    /// Order side (buy/sell).
+    #[serde(rename = "type")]
+    pub side: BuySell,
+    /// Order type.
+    pub ordertype: OrderType,
+    /// Order volume.
+    pub volume: Decimal,
+    /// Display volume for iceberg orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub displayvol: Option<Decimal>,
+    /// Price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<Decimal>,
+    /// Secondary price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price2: Option<Decimal>,
+    /// Price type for triggered orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// Leverage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leverage: Option<String>,
+    /// Reduce only flag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reduce_only: Option<bool>,
+    /// Self trade prevention.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stptype: Option<String>,
+    /// Order flags (comma-separated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oflags: Option<String>,
+    /// Time in force.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeinforce: Option<String>,
+    /// Scheduled start time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starttm: Option<String>,
+    /// Expiration time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiretm: Option<String>,
+    /// User reference ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub userref: Option<i64>,
+    /// Client order ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cl_ord_id: Option<String>,
+}
+
+impl BatchOrder {
+    /// Create a new batch order entry.
+    pub fn new(side: BuySell, ordertype: OrderType, volume: Decimal) -> Self {
+        Self {
+            side,
+            ordertype,
+            volume,
+            displayvol: None,
+            price: None,
+            price2: None,
+            trigger: None,
+            leverage: None,
+            reduce_only: None,
+            stptype: None,
+            oflags: None,
+            timeinforce: None,
+            starttm: None,
+            expiretm: None,
+            userref: None,
+            cl_ord_id: None,
+        }
+    }
+
+    /// Set the price.
+    pub fn price(mut self, price: Decimal) -> Self {
+        self.price = Some(price);
+        self
+    }
+
+    /// Set user reference ID.
+    pub fn userref(mut self, userref: i64) -> Self {
+        self.userref = Some(userref);
+        self
+    }
+}
+
+/// Request to place multiple orders in a single batch (up to 15).
+#[derive(Debug, Clone, Serialize)]
+pub struct AddOrderBatchRequest {
+    /// Orders to place.
+    pub orders: Vec<BatchOrder>,
+    /// Asset pair for all orders in the batch.
+    pub pair: String,
+    /// Deadline in RFC 3339 format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
+    /// Validate only (don't submit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validate: Option<bool>,
+}
+
+impl AddOrderBatchRequest {
+    /// Create a new batch order request.
+    pub fn new(pair: impl Into<String>, orders: Vec<BatchOrder>) -> Self {
+        Self {
+            orders,
+            pair: pair.into(),
+            deadline: None,
+            validate: None,
+        }
+    }
+
+    /// Set as validate only.
+    pub fn validate(mut self, validate: bool) -> Self {
+        self.validate = Some(validate);
+        self
+    }
+}
+
+/// Result of a single order within a batch response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchOrderResult {
+    /// Transaction ID (absent when validating).
+    #[serde(default)]
+    pub txid: Option<String>,
+    /// Order description.
+    #[serde(default)]
+    pub descr: Option<AddOrderDescription>,
+    /// Error message for this order.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Add order batch response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AddOrderBatchResponse {
+    /// Results per order.
+    pub orders: Vec<BatchOrderResult>,
+}
+
+/// Order identifier within a batch cancel request.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum BatchCancelId {
+    /// Transaction ID.
+    Txid(String),
+    /// User reference ID.
+    Userref(i64),
+}
+
+/// Request to cancel multiple orders in a single batch (up to 50).
+#[derive(Debug, Clone, Serialize)]
+pub struct CancelOrderBatchRequest {
+    /// Orders to cancel by transaction ID or user reference ID.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub orders: Vec<BatchCancelId>,
+    /// Orders to cancel by client order ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cl_ord_ids: Option<Vec<String>>,
+}
+
+impl CancelOrderBatchRequest {
+    /// Create a batch cancel request from transaction IDs.
+    pub fn from_txids(txids: Vec<String>) -> Self {
+        Self {
+            orders: txids.into_iter().map(BatchCancelId::Txid).collect(),
+            cl_ord_ids: None,
+        }
+    }
+
+    /// Create a batch cancel request from user reference IDs.
+    pub fn from_userrefs(userrefs: Vec<i64>) -> Self {
+        Self {
+            orders: userrefs.into_iter().map(BatchCancelId::Userref).collect(),
+            cl_ord_ids: None,
+        }
+    }
+
+    /// Create a batch cancel request from client order IDs.
+    pub fn from_client_order_ids(ids: Vec<String>) -> Self {
+        Self {
+            orders: Vec::new(),
+            cl_ord_ids: Some(ids),
+        }
+    }
+}
+
+/// Request to cancel all orders after a timeout (dead man's switch).
+#[derive(Debug, Clone, Serialize)]
+pub struct CancelAllOrdersAfterRequest {
+    /// Timeout in seconds, 0 disables the timer.
+    pub timeout: i64,
+}
+
+impl CancelAllOrdersAfterRequest {
+    /// Create a new request with the given timeout in seconds.
+    pub fn new(timeout: i64) -> Self {
+        Self { timeout }
+    }
+
+    /// Create a request that disables the timer.
+    pub fn disable() -> Self {
+        Self { timeout: 0 }
+    }
+}
+
+/// Cancel all orders after response.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelAllOrdersAfterResponse {
+    /// Current server time.
+    pub current_time: String,
+    /// Time at which orders will be cancelled.
+    pub trigger_time: String,
+}
+
+// Export report endpoints
+
+/// Type of data to export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportType {
+    /// Trades report.
+    Trades,
+    /// Ledgers report.
+    Ledgers,
+}
+
+/// File format of an export report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ReportFormat {
+    /// Comma-separated values.
+    Csv,
+    /// Tab-separated values.
+    Tsv,
+}
+
+/// Request to generate an export report.
+#[derive(Debug, Clone, Serialize)]
+pub struct AddExportRequest {
+    /// Type of data to export.
+    pub report: ReportType,
+    /// Report description.
+    pub description: String,
+    /// File format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<ReportFormat>,
+    /// Comma-separated list of fields to include.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<String>,
+    /// Report start timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starttm: Option<i64>,
+    /// Report end timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endtm: Option<i64>,
+}
+
+impl AddExportRequest {
+    /// Create a new export request.
+    pub fn new(report: ReportType, description: impl Into<String>) -> Self {
+        Self {
+            report,
+            description: description.into(),
+            format: None,
+            fields: None,
+            starttm: None,
+            endtm: None,
+        }
+    }
+
+    /// Set the file format.
+    pub fn format(mut self, format: ReportFormat) -> Self {
+        self.format = Some(format);
+        self
+    }
+}
+
+/// Add export response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AddExportResponse {
+    /// Report ID.
+    pub id: String,
+}
+
+/// Request for the status of export reports.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportStatusRequest {
+    /// Type of report to query.
+    pub report: ReportType,
+}
+
+impl ExportStatusRequest {
+    /// Create a new export status request.
+    pub fn new(report: ReportType) -> Self {
+        Self { report }
+    }
+}
+
+/// Status of a requested export report.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExportReportStatus {
+    /// Report ID.
+    pub id: String,
+    /// Report description.
+    pub descr: String,
+    /// File format.
+    pub format: String,
+    /// Type of data in the report.
+    pub report: String,
+    /// Report status (Queued, Processing, or Processed).
+    pub status: String,
+    /// Comma-separated list of fields.
+    #[serde(default)]
+    pub fields: Option<String>,
+    /// Creation timestamp.
+    #[serde(default)]
+    pub createdtm: Option<String>,
+    /// Processing start timestamp.
+    #[serde(default)]
+    pub starttm: Option<String>,
+    /// Completion timestamp.
+    #[serde(default)]
+    pub completedtm: Option<String>,
+    /// Data range start timestamp.
+    #[serde(default)]
+    pub datastarttm: Option<String>,
+    /// Data range end timestamp.
+    #[serde(default)]
+    pub dataendtm: Option<String>,
+    /// Assets included in the report.
+    #[serde(default)]
+    pub asset: Option<String>,
+}
+
+/// Request to retrieve a generated export report.
+#[derive(Debug, Clone, Serialize)]
+pub struct RetrieveExportRequest {
+    /// Report ID.
+    pub id: String,
+}
+
+impl RetrieveExportRequest {
+    /// Create a new retrieve export request.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+}
+
+/// Type of removal for an export report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RemoveExportType {
+    /// Cancel a queued or processing report.
+    Cancel,
+    /// Delete a processed report.
+    Delete,
+}
+
+/// Request to remove an export report.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoveExportRequest {
+    /// Report ID.
+    pub id: String,
+    /// Type of removal.
+    #[serde(rename = "type")]
+    pub removal_type: RemoveExportType,
+}
+
+impl RemoveExportRequest {
+    /// Create a new remove export request.
+    pub fn new(id: impl Into<String>, removal_type: RemoveExportType) -> Self {
+        Self {
+            id: id.into(),
+            removal_type,
+        }
+    }
+}
+
+/// Remove export response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RemoveExportResponse {
+    /// Whether the report was deleted.
+    #[serde(default)]
+    pub delete: Option<bool>,
+    /// Whether the report was cancelled.
+    #[serde(default)]
+    pub cancel: Option<bool>,
+}
+
+// Subaccount endpoints
+
+/// Request to create a trading subaccount.
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateSubaccountRequest {
+    /// Username for the subaccount.
+    pub username: String,
+    /// Email address for the subaccount.
+    pub email: String,
+}
+
+impl CreateSubaccountRequest {
+    /// Create a new subaccount request.
+    pub fn new(username: impl Into<String>, email: impl Into<String>) -> Self {
+        Self {
+            username: username.into(),
+            email: email.into(),
+        }
+    }
+}
+
+/// Request to transfer funds between master and subaccounts.
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountTransferRequest {
+    /// Asset to transfer.
+    pub asset: String,
+    /// Amount to transfer.
+    pub amount: Decimal,
+    /// Account ID to transfer from.
+    pub from: String,
+    /// Account ID to transfer to.
+    pub to: String,
+}
+
+impl AccountTransferRequest {
+    /// Create a new account transfer request.
+    pub fn new(
+        asset: impl Into<String>,
+        amount: Decimal,
+        from: impl Into<String>,
+        to: impl Into<String>,
+    ) -> Self {
+        Self {
+            asset: asset.into(),
+            amount,
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+}
+
+/// Status of an account transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountTransferStatus {
+    /// Transfer is pending.
+    Pending,
+    /// Transfer is complete.
+    Complete,
+}
+
+/// Account transfer response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountTransferResponse {
+    /// Transfer ID.
+    pub transfer_id: String,
+    /// Transfer status.
+    pub status: AccountTransferStatus,
+}

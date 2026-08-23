@@ -7,9 +7,7 @@ use std::collections::HashMap;
 use crate::futures::types::*;
 use crate::types::common::BuySell;
 
-
 // Response Wrappers
-
 
 /// Response for tickers endpoint.
 #[derive(Debug, Clone, Deserialize)]
@@ -122,9 +120,7 @@ pub struct FillsResponse {
     pub server_time: Option<String>,
 }
 
-
 // Trading Request/Response Types
-
 
 /// Request to send a new order.
 #[derive(Debug, Clone, Serialize)]
@@ -432,9 +428,7 @@ pub struct CancelAllOrdersAfterResponse {
     pub server_time: Option<String>,
 }
 
-
 // Batch Order Types
-
 
 /// Request for batch order operations.
 #[derive(Debug, Clone, Serialize)]
@@ -454,34 +448,37 @@ impl BatchOrderRequest {
 
     /// Add a place order element.
     pub fn place(mut self, order: SendOrderRequest) -> Self {
-        self.batch_order.push(BatchElement::Place(PlaceBatchElement {
-            order_type: order.order_type,
-            symbol: order.symbol,
-            side: order.side,
-            size: order.size,
-            limit_price: order.limit_price,
-            stop_price: order.stop_price,
-            reduce_only: order.reduce_only,
-            cli_ord_id: order.cli_ord_id,
-        }));
+        self.batch_order
+            .push(BatchElement::Place(PlaceBatchElement {
+                order_type: order.order_type,
+                symbol: order.symbol,
+                side: order.side,
+                size: order.size,
+                limit_price: order.limit_price,
+                stop_price: order.stop_price,
+                reduce_only: order.reduce_only,
+                cli_ord_id: order.cli_ord_id,
+            }));
         self
     }
 
     /// Add a cancel order element.
     pub fn cancel(mut self, order_id: impl Into<String>) -> Self {
-        self.batch_order.push(BatchElement::Cancel(CancelBatchElement {
-            order_id: Some(order_id.into()),
-            cli_ord_id: None,
-        }));
+        self.batch_order
+            .push(BatchElement::Cancel(CancelBatchElement {
+                order_id: Some(order_id.into()),
+                cli_ord_id: None,
+            }));
         self
     }
 
     /// Add a cancel by client order ID element.
     pub fn cancel_by_cli_ord_id(mut self, cli_ord_id: impl Into<String>) -> Self {
-        self.batch_order.push(BatchElement::Cancel(CancelBatchElement {
-            order_id: None,
-            cli_ord_id: Some(cli_ord_id.into()),
-        }));
+        self.batch_order
+            .push(BatchElement::Cancel(CancelBatchElement {
+                order_id: None,
+                cli_ord_id: Some(cli_ord_id.into()),
+            }));
         self
     }
 }
@@ -561,15 +558,491 @@ pub struct BatchElementStatus {
     pub error_message: Option<String>,
 }
 
+// Generic Response Types
+
+/// Generic response containing only the result status and server time.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuturesResultResponse {
+    /// Result status
+    pub result: String,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+// Fee Schedule Types
+
+/// Response for fee schedules endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeSchedulesResponse {
+    /// Result status
+    pub result: String,
+    /// List of fee schedules
+    #[serde(rename = "feeSchedules")]
+    pub fee_schedules: Vec<FeeSchedule>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// A fee schedule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeSchedule {
+    /// Schedule UID
+    pub uid: String,
+    /// Schedule name
+    pub name: String,
+    /// Fee tiers
+    pub tiers: Vec<FeeTier>,
+}
+
+/// A single tier in a fee schedule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeTier {
+    /// Maker fee in percent
+    #[serde(rename = "makerFee")]
+    pub maker_fee: f64,
+    /// Taker fee in percent
+    #[serde(rename = "takerFee")]
+    pub taker_fee: f64,
+    /// USD volume required for this tier
+    #[serde(rename = "usdVolume")]
+    pub usd_volume: f64,
+}
+
+/// Response for fee schedule volumes endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeScheduleVolumesResponse {
+    /// Result status
+    pub result: String,
+    /// Volumes keyed by fee schedule UID
+    #[serde(rename = "volumesByFeeSchedule")]
+    pub volumes_by_fee_schedule: HashMap<String, f64>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+// Funding Rate Types
+
+/// Response for historical funding rates endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoricalFundingRatesResponse {
+    /// Result status
+    #[serde(default)]
+    pub result: Option<String>,
+    /// List of funding rates
+    pub rates: Vec<FundingRateEntry>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// A single historical funding rate.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingRateEntry {
+    /// Funding rate timestamp
+    pub timestamp: String,
+    /// Absolute funding rate
+    #[serde(rename = "fundingRate")]
+    pub funding_rate: f64,
+    /// Funding rate relative to the price
+    #[serde(rename = "relativeFundingRate")]
+    pub relative_funding_rate: Option<f64>,
+}
+
+// Chart Types
+
+/// Tick type for OHLC chart data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickType {
+    /// Spot price data
+    Spot,
+    /// Mark price data
+    Mark,
+    /// Trade price data
+    Trade,
+}
+
+impl TickType {
+    /// Return the path segment used by the charts API.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TickType::Spot => "spot",
+            TickType::Mark => "mark",
+            TickType::Trade => "trade",
+        }
+    }
+}
+
+impl std::fmt::Display for TickType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Response for OHLC chart endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OhlcResponse {
+    /// List of candles
+    pub candles: Vec<Candle>,
+    /// Whether more candles are available in the requested range
+    #[serde(default)]
+    pub more_candles: Option<bool>,
+}
+
+/// A single OHLC candle.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Candle {
+    /// Candle timestamp in milliseconds
+    pub time: i64,
+    /// Open price
+    pub open: Decimal,
+    /// High price
+    pub high: Decimal,
+    /// Low price
+    pub low: Decimal,
+    /// Close price
+    pub close: Decimal,
+    /// Volume
+    pub volume: Decimal,
+}
+
+// Transfer and Withdrawal Types
+
+/// Request to transfer funds between margin accounts.
+#[derive(Debug, Clone, Serialize)]
+pub struct TransferRequest {
+    /// Account to withdraw from
+    #[serde(rename = "fromAccount")]
+    pub from_account: String,
+    /// Account to deposit to
+    #[serde(rename = "toAccount")]
+    pub to_account: String,
+    /// Currency or asset to transfer
+    pub unit: String,
+    /// Amount to transfer
+    pub amount: Decimal,
+}
+
+/// Request to transfer funds between the main account and a subaccount.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubAccountTransferRequest {
+    /// Account to withdraw from
+    #[serde(rename = "fromAccount")]
+    pub from_account: String,
+    /// User to transfer from
+    #[serde(rename = "fromUser")]
+    pub from_user: String,
+    /// Account to deposit to
+    #[serde(rename = "toAccount")]
+    pub to_account: String,
+    /// User to transfer to
+    #[serde(rename = "toUser")]
+    pub to_user: String,
+    /// Asset to transfer
+    pub unit: String,
+    /// Amount to transfer
+    pub amount: Decimal,
+}
+
+/// Request to withdraw funds from the futures wallet to the spot wallet.
+#[derive(Debug, Clone, Serialize)]
+pub struct WithdrawalRequest {
+    /// Amount to withdraw
+    pub amount: Decimal,
+    /// Asset or currency to withdraw
+    pub currency: String,
+    /// Wallet to withdraw from (defaults to cash)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "sourceWallet")]
+    pub source_wallet: Option<String>,
+}
+
+// Account Log Types
+
+/// Request parameters for the account log endpoint.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AccountLogRequest {
+    /// Return results before this timestamp or date
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// Maximum number of results (max 500)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
+    /// First entry id to start with
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// Filter by info string
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info: Option<String>,
+    /// First entry to begin with by item
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// Sort order
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    /// Last entry id
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+}
+
+/// Response for the account log endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountLogResponse {
+    /// Account UID
+    #[serde(default, rename = "accountUid")]
+    pub account_uid: Option<String>,
+    /// Account log entries
+    pub logs: Vec<AccountLogEntry>,
+}
+
+/// A single account log entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountLogEntry {
+    /// Entry id
+    pub id: i64,
+    /// Entry date
+    pub date: String,
+    /// Entry description
+    pub info: String,
+    /// Asset
+    #[serde(default)]
+    pub asset: Option<String>,
+    /// Contract
+    #[serde(default)]
+    pub contract: Option<String>,
+    /// Booking UID
+    #[serde(default)]
+    pub booking_uid: Option<String>,
+    /// Collateral
+    #[serde(default)]
+    pub collateral: Option<String>,
+    /// Execution id
+    #[serde(default)]
+    pub execution: Option<String>,
+    /// Fee
+    #[serde(default)]
+    pub fee: Option<f64>,
+    /// Funding rate
+    #[serde(default)]
+    pub funding_rate: Option<f64>,
+    /// Margin account
+    #[serde(default)]
+    pub margin_account: Option<String>,
+    /// Mark price
+    #[serde(default)]
+    pub mark_price: Option<f64>,
+    /// New average entry price
+    #[serde(default)]
+    pub new_average_entry_price: Option<f64>,
+    /// New balance
+    #[serde(default)]
+    pub new_balance: Option<f64>,
+    /// Old average entry price
+    #[serde(default)]
+    pub old_average_entry_price: Option<f64>,
+    /// Old balance
+    #[serde(default)]
+    pub old_balance: Option<f64>,
+    /// Realized funding
+    #[serde(default)]
+    pub realized_funding: Option<f64>,
+    /// Realized PnL
+    #[serde(default)]
+    pub realized_pnl: Option<f64>,
+    /// Trade price
+    #[serde(default)]
+    pub trade_price: Option<f64>,
+}
+
+// Notification Types
+
+/// Response for the notifications endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotificationsResponse {
+    /// Result status
+    pub result: String,
+    /// List of notifications
+    pub notifications: Vec<FuturesNotification>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// A single notification.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuturesNotification {
+    /// Notification type
+    #[serde(rename = "type")]
+    pub notification_type: String,
+    /// Priority
+    #[serde(default)]
+    pub priority: Option<String>,
+    /// Notification text
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Time when the notification becomes effective
+    #[serde(default, rename = "effectiveTime")]
+    pub effective_time: Option<String>,
+}
+
+// Unwind Queue Types
+
+/// Response for the unwind queue endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnwindQueueResponse {
+    /// Result status
+    pub result: String,
+    /// Unwind queue entries
+    pub queue: Vec<UnwindQueueEntry>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// Unwind queue position for a single symbol.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnwindQueueEntry {
+    /// Futures symbol
+    pub symbol: String,
+    /// Percentile of the open interest in the unwind queue
+    pub percentile: f64,
+}
+
+// Preference Types
+
+/// Response for the leverage preferences endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LeveragePreferencesResponse {
+    /// Result status
+    pub result: String,
+    /// Leverage preferences per symbol
+    #[serde(rename = "leveragePreferences")]
+    pub leverage_preferences: Vec<LeveragePreference>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// Leverage preference for a single symbol.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LeveragePreference {
+    /// Futures symbol
+    pub symbol: String,
+    /// Maximum leverage
+    #[serde(default, rename = "maxLeverage")]
+    pub max_leverage: Option<f64>,
+}
+
+/// Response for the PnL preferences endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PnlPreferencesResponse {
+    /// Result status
+    pub result: String,
+    /// PnL preferences per symbol
+    pub preferences: Vec<PnlPreference>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// PnL currency preference for a single symbol.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PnlPreference {
+    /// Futures symbol
+    pub symbol: String,
+    /// Currency in which profits and losses are realized
+    #[serde(rename = "pnlCurrency")]
+    pub pnl_currency: String,
+}
+
+// Order Status Types
+
+/// Response for the orders status endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrdersStatusResponse {
+    /// Result status
+    pub result: String,
+    /// Status of the requested orders
+    pub orders: Vec<OrderStatusEntry>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// Status of a single order.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderStatusEntry {
+    /// Order status (e.g. ENTERED_BOOK)
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Order details
+    #[serde(default)]
+    pub order: Option<OrderStatusDetails>,
+    /// Reason for the last update
+    #[serde(default, rename = "updateReason")]
+    pub update_reason: Option<String>,
+    /// Error message (if the order could not be found)
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Order details returned by the orders status endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderStatusDetails {
+    /// Order ID
+    #[serde(default, alias = "orderId", alias = "order_id")]
+    pub order_id: Option<String>,
+    /// Client order ID
+    #[serde(default, rename = "cliOrdId")]
+    pub cli_ord_id: Option<String>,
+    /// Order type
+    #[serde(default, rename = "type")]
+    pub order_type: Option<String>,
+    /// Futures symbol
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// Order side
+    #[serde(default)]
+    pub side: Option<BuySell>,
+    /// Order quantity
+    #[serde(default)]
+    pub quantity: Option<f64>,
+    /// Filled quantity
+    #[serde(default)]
+    pub filled: Option<f64>,
+    /// Limit price
+    #[serde(default, rename = "limitPrice")]
+    pub limit_price: Option<f64>,
+    /// Stop price
+    #[serde(default, rename = "stopPrice")]
+    pub stop_price: Option<f64>,
+    /// Reduce-only flag
+    #[serde(default, rename = "reduceOnly")]
+    pub reduce_only: Option<bool>,
+    /// Order timestamp
+    #[serde(default)]
+    pub timestamp: Option<String>,
+    /// Last update timestamp
+    #[serde(default, rename = "lastUpdateTimestamp")]
+    pub last_update_timestamp: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_send_order_request_limit() {
-        let request = SendOrderRequest::limit("PI_XBTUSD", BuySell::Buy, Decimal::from(100), Decimal::from(50000))
-            .reduce_only(true)
-            .cli_ord_id("my-order-1");
+        let request = SendOrderRequest::limit(
+            "PI_XBTUSD",
+            BuySell::Buy,
+            Decimal::from(100),
+            Decimal::from(50000),
+        )
+        .reduce_only(true)
+        .cli_ord_id("my-order-1");
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("limitPrice"));
@@ -601,7 +1074,12 @@ mod tests {
     #[test]
     fn test_batch_order_request() {
         let batch = BatchOrderRequest::new()
-            .place(SendOrderRequest::limit("PI_XBTUSD", BuySell::Buy, Decimal::from(100), Decimal::from(50000)))
+            .place(SendOrderRequest::limit(
+                "PI_XBTUSD",
+                BuySell::Buy,
+                Decimal::from(100),
+                Decimal::from(50000),
+            ))
             .cancel("order-to-cancel");
 
         assert_eq!(batch.batch_order.len(), 2);

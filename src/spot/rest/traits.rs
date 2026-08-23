@@ -25,16 +25,23 @@ use rust_decimal::Decimal;
 
 use crate::error::KrakenError;
 use crate::spot::rest::private::{
-    AddOrderRequest, AddOrderResponse, AllocationStatus, CancelOrderRequest, CancelOrderResponse,
-    ClosedOrders, ClosedOrdersRequest, ConfirmationRefId, DepositAddress, DepositAddressesRequest,
-    DepositMethod, DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
+    AccountTransferRequest, AccountTransferResponse, AddExportRequest, AddExportResponse,
+    AddOrderBatchRequest, AddOrderBatchResponse, AddOrderRequest, AddOrderResponse,
+    AllocationStatus, AmendOrderRequest, AmendOrderResponse, CancelAllOrdersAfterRequest,
+    CancelAllOrdersAfterResponse, CancelOrderBatchRequest, CancelOrderRequest,
+    CancelOrderResponse, ClosedOrders, ClosedOrdersRequest, ConfirmationRefId,
+    CreateSubaccountRequest, DepositAddress, DepositAddressesRequest, DepositMethod,
+    DepositMethodsRequest, DepositStatusRequest, DepositWithdrawStatusResponse,
     EarnAllocateRequest, EarnAllocationStatusRequest, EarnAllocations, EarnAllocationsRequest,
-    EarnStrategies, EarnStrategiesRequest, ExtendedBalances, LedgersInfo, LedgersRequest,
-    OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, Position, QueryOrdersRequest,
-    TradeBalance, TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory,
-    TradesHistoryRequest, WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest,
-    WithdrawCancelRequest, WithdrawInfo, WithdrawInfoRequest, WithdrawMethod,
-    WithdrawMethodsRequest, WithdrawRequest, WithdrawStatusRequest, WithdrawalAddress,
+    EarnStrategies, EarnStrategiesRequest, EditOrderRequest, EditOrderResponse,
+    ExportReportStatus, ExportStatusRequest, ExtendedBalances, LedgerEntry, LedgersInfo,
+    LedgersRequest, OpenOrders, OpenOrdersRequest, OpenPositionsRequest, Order, OrderAmends,
+    OrderAmendsRequest, Position, QueryLedgersRequest, QueryOrdersRequest, QueryTradesRequest,
+    RemoveExportRequest, RemoveExportResponse, RetrieveExportRequest, Trade, TradeBalance,
+    TradeBalanceRequest, TradeVolume, TradeVolumeRequest, TradesHistory, TradesHistoryRequest,
+    WalletTransferRequest, WebSocketToken, WithdrawAddressesRequest, WithdrawCancelRequest,
+    WithdrawInfo, WithdrawInfoRequest, WithdrawMethod, WithdrawMethodsRequest, WithdrawRequest,
+    WithdrawStatusRequest, WithdrawalAddress,
 };
 use crate::spot::rest::public::{
     AssetInfo, AssetInfoRequest, AssetPair, AssetPairsRequest, OhlcRequest, OhlcResponse,
@@ -161,6 +168,64 @@ pub trait KrakenClient: Send + Sync {
         request: Option<&TradeVolumeRequest>,
     ) -> impl Future<Output = Result<TradeVolume, KrakenError>> + Send;
 
+    /// Query specific trades by transaction ID.
+    fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> impl Future<Output = Result<HashMap<String, Trade>, KrakenError>> + Send;
+
+    /// Query specific ledger entries by ID.
+    fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> impl Future<Output = Result<HashMap<String, LedgerEntry>, KrakenError>> + Send;
+
+    /// Get the amend history of an order.
+    fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> impl Future<Output = Result<OrderAmends, KrakenError>> + Send;
+
+    // ========== Private Endpoints - Export ==========
+
+    /// Request generation of an export report.
+    fn add_export(
+        &self,
+        request: &AddExportRequest,
+    ) -> impl Future<Output = Result<AddExportResponse, KrakenError>> + Send;
+
+    /// Get the status of requested export reports.
+    fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> impl Future<Output = Result<Vec<ExportReportStatus>, KrakenError>> + Send;
+
+    /// Retrieve a generated export report as raw bytes.
+    fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> impl Future<Output = Result<Vec<u8>, KrakenError>> + Send;
+
+    /// Cancel or delete an export report.
+    fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> impl Future<Output = Result<RemoveExportResponse, KrakenError>> + Send;
+
+    // ========== Private Endpoints - Subaccounts ==========
+
+    /// Create a trading subaccount.
+    fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> impl Future<Output = Result<bool, KrakenError>> + Send;
+
+    /// Transfer funds between master and subaccounts.
+    fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> impl Future<Output = Result<AccountTransferResponse, KrakenError>> + Send;
+
     // ========== Private Endpoints - Funding ==========
 
     /// Get available deposit methods.
@@ -269,6 +334,24 @@ pub trait KrakenClient: Send + Sync {
         request: &AddOrderRequest,
     ) -> impl Future<Output = Result<AddOrderResponse, KrakenError>> + Send;
 
+    /// Place multiple orders in a single batch.
+    fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> impl Future<Output = Result<AddOrderBatchResponse, KrakenError>> + Send;
+
+    /// Amend an existing order in place.
+    fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> impl Future<Output = Result<AmendOrderResponse, KrakenError>> + Send;
+
+    /// Edit an existing order.
+    fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> impl Future<Output = Result<EditOrderResponse, KrakenError>> + Send;
+
     /// Cancel an order.
     fn cancel_order(
         &self,
@@ -278,6 +361,18 @@ pub trait KrakenClient: Send + Sync {
     /// Cancel all open orders.
     fn cancel_all_orders(
         &self,
+    ) -> impl Future<Output = Result<CancelOrderResponse, KrakenError>> + Send;
+
+    /// Cancel all orders after a timeout (dead man's switch).
+    fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> impl Future<Output = Result<CancelAllOrdersAfterResponse, KrakenError>> + Send;
+
+    /// Cancel multiple orders in a single batch.
+    fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
     ) -> impl Future<Output = Result<CancelOrderResponse, KrakenError>> + Send;
 
     // ========== Private Endpoints - WebSocket ==========
@@ -356,6 +451,46 @@ pub trait KrakenClientExt: Send + Sync {
         &self,
         request: Option<&TradeVolumeRequest>,
     ) -> Result<TradeVolume, KrakenError>;
+    async fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> Result<HashMap<String, Trade>, KrakenError>;
+    async fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> Result<HashMap<String, LedgerEntry>, KrakenError>;
+    async fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> Result<OrderAmends, KrakenError>;
+
+    // ========== Private Endpoints - Export ==========
+
+    async fn add_export(&self, request: &AddExportRequest)
+    -> Result<AddExportResponse, KrakenError>;
+    async fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> Result<Vec<ExportReportStatus>, KrakenError>;
+    async fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> Result<Vec<u8>, KrakenError>;
+    async fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> Result<RemoveExportResponse, KrakenError>;
+
+    // ========== Private Endpoints - Subaccounts ==========
+
+    async fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> Result<bool, KrakenError>;
+    async fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> Result<AccountTransferResponse, KrakenError>;
 
     // ========== Private Endpoints - Funding ==========
 
@@ -421,11 +556,31 @@ pub trait KrakenClientExt: Send + Sync {
     // ========== Private Endpoints - Trading ==========
 
     async fn add_order(&self, request: &AddOrderRequest) -> Result<AddOrderResponse, KrakenError>;
+    async fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> Result<AddOrderBatchResponse, KrakenError>;
+    async fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> Result<AmendOrderResponse, KrakenError>;
+    async fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> Result<EditOrderResponse, KrakenError>;
     async fn cancel_order(
         &self,
         request: &CancelOrderRequest,
     ) -> Result<CancelOrderResponse, KrakenError>;
     async fn cancel_all_orders(&self) -> Result<CancelOrderResponse, KrakenError>;
+    async fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> Result<CancelAllOrdersAfterResponse, KrakenError>;
+    async fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
+    ) -> Result<CancelOrderResponse, KrakenError>;
 
     // ========== Private Endpoints - WebSocket ==========
 
@@ -549,6 +704,69 @@ impl<T: KrakenClient> KrakenClientExt for T {
         KrakenClient::get_trade_volume(self, request).await
     }
 
+    async fn query_trades(
+        &self,
+        request: &QueryTradesRequest,
+    ) -> Result<HashMap<String, Trade>, KrakenError> {
+        KrakenClient::query_trades(self, request).await
+    }
+
+    async fn query_ledgers(
+        &self,
+        request: &QueryLedgersRequest,
+    ) -> Result<HashMap<String, LedgerEntry>, KrakenError> {
+        KrakenClient::query_ledgers(self, request).await
+    }
+
+    async fn get_order_amends(
+        &self,
+        request: &OrderAmendsRequest,
+    ) -> Result<OrderAmends, KrakenError> {
+        KrakenClient::get_order_amends(self, request).await
+    }
+
+    async fn add_export(
+        &self,
+        request: &AddExportRequest,
+    ) -> Result<AddExportResponse, KrakenError> {
+        KrakenClient::add_export(self, request).await
+    }
+
+    async fn get_export_status(
+        &self,
+        request: &ExportStatusRequest,
+    ) -> Result<Vec<ExportReportStatus>, KrakenError> {
+        KrakenClient::get_export_status(self, request).await
+    }
+
+    async fn retrieve_export(
+        &self,
+        request: &RetrieveExportRequest,
+    ) -> Result<Vec<u8>, KrakenError> {
+        KrakenClient::retrieve_export(self, request).await
+    }
+
+    async fn remove_export(
+        &self,
+        request: &RemoveExportRequest,
+    ) -> Result<RemoveExportResponse, KrakenError> {
+        KrakenClient::remove_export(self, request).await
+    }
+
+    async fn create_subaccount(
+        &self,
+        request: &CreateSubaccountRequest,
+    ) -> Result<bool, KrakenError> {
+        KrakenClient::create_subaccount(self, request).await
+    }
+
+    async fn account_transfer(
+        &self,
+        request: &AccountTransferRequest,
+    ) -> Result<AccountTransferResponse, KrakenError> {
+        KrakenClient::account_transfer(self, request).await
+    }
+
     async fn get_deposit_methods(
         &self,
         request: &DepositMethodsRequest,
@@ -656,6 +874,27 @@ impl<T: KrakenClient> KrakenClientExt for T {
         KrakenClient::add_order(self, request).await
     }
 
+    async fn add_order_batch(
+        &self,
+        request: &AddOrderBatchRequest,
+    ) -> Result<AddOrderBatchResponse, KrakenError> {
+        KrakenClient::add_order_batch(self, request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: &AmendOrderRequest,
+    ) -> Result<AmendOrderResponse, KrakenError> {
+        KrakenClient::amend_order(self, request).await
+    }
+
+    async fn edit_order(
+        &self,
+        request: &EditOrderRequest,
+    ) -> Result<EditOrderResponse, KrakenError> {
+        KrakenClient::edit_order(self, request).await
+    }
+
     async fn cancel_order(
         &self,
         request: &CancelOrderRequest,
@@ -665,6 +904,20 @@ impl<T: KrakenClient> KrakenClientExt for T {
 
     async fn cancel_all_orders(&self) -> Result<CancelOrderResponse, KrakenError> {
         KrakenClient::cancel_all_orders(self).await
+    }
+
+    async fn cancel_all_orders_after(
+        &self,
+        request: &CancelAllOrdersAfterRequest,
+    ) -> Result<CancelAllOrdersAfterResponse, KrakenError> {
+        KrakenClient::cancel_all_orders_after(self, request).await
+    }
+
+    async fn cancel_order_batch(
+        &self,
+        request: &CancelOrderBatchRequest,
+    ) -> Result<CancelOrderResponse, KrakenError> {
+        KrakenClient::cancel_order_batch(self, request).await
     }
 
     async fn get_websocket_token(&self) -> Result<WebSocketToken, KrakenError> {

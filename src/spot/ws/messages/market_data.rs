@@ -231,3 +231,62 @@ pub struct PairData {
     #[serde(default)]
     pub cost_min: Option<Decimal>,
 }
+
+/// Level 3 order book message (individual orders).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Level3Message {
+    /// Channel name.
+    pub channel: String,
+    /// Message type ("snapshot" or "update").
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    /// Level 3 data.
+    pub data: Vec<Level3Data>,
+}
+
+/// Level 3 order book data for one symbol.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Level3Data {
+    /// Symbol.
+    pub symbol: String,
+    /// Bid orders.
+    #[serde(default)]
+    pub bids: Vec<Level3Order>,
+    /// Ask orders.
+    #[serde(default)]
+    pub asks: Vec<Level3Order>,
+    /// Checksum for validation.
+    #[serde(default)]
+    pub checksum: Option<u32>,
+    /// Timestamp.
+    #[serde(default)]
+    pub timestamp: Option<String>,
+}
+
+/// Type of a level 3 order event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Level3Event {
+    /// Order added.
+    Add,
+    /// Order modified.
+    Modify,
+    /// Order removed.
+    Delete,
+}
+
+/// A single order in the level 3 book.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Level3Order {
+    /// Event type (absent in snapshots).
+    #[serde(default)]
+    pub event: Option<Level3Event>,
+    /// Order ID.
+    pub order_id: String,
+    /// Limit price.
+    pub limit_price: Decimal,
+    /// Order quantity.
+    pub order_qty: Decimal,
+    /// Order timestamp.
+    pub timestamp: String,
+}

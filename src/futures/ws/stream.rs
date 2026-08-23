@@ -52,6 +52,8 @@ pub enum FuturesWsEvent {
     OpenPositions(OpenPositionsMessage),
     /// Balances (private).
     Balances(BalancesMessage),
+    /// Account log (private).
+    AccountLog(AccountLogMessage),
     /// Raw/unknown message.
     Raw(serde_json::Value),
     /// Connection disconnected.
@@ -595,6 +597,11 @@ impl FuturesStream {
             "balances" | "balances_snapshot" => {
                 if let Ok(balances) = serde_json::from_value::<BalancesMessage>(value) {
                     return Some(FuturesWsEvent::Balances(balances));
+                }
+            }
+            "account_log" | "account_log_snapshot" => {
+                if let Ok(log) = serde_json::from_value::<AccountLogMessage>(value) {
+                    return Some(FuturesWsEvent::AccountLog(log));
                 }
             }
             _ => {

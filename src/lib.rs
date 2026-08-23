@@ -30,7 +30,7 @@ pub mod rate_limit;
 pub mod spot;
 pub mod types;
 
-// Placeholder for future Kraken Futures API support
+// Kraken Futures API support
 pub mod futures;
 
 // Re-export commonly used types at crate root

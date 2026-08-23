@@ -17,9 +17,11 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use crate::error::KrakenError;
 use crate::spot::ws::client::WsConfig;
 use crate::spot::ws::messages::{
-    channels, AddOrderParams, AddOrderResult, CancelAllParams, CancelAllResult, CancelOrderParams,
-    CancelOrderResult, EditOrderParams, EditOrderResult, Heartbeat, PingRequest, PongResponse,
-    SubscribeParams, SubscriptionResult, SystemStatusMessage, WsRequest,
+    channels, AddOrderParams, AddOrderResult, AmendOrderParams, AmendOrderResult, BatchAddParams,
+    BatchCancelParams, BatchCancelResult, CancelAllOrdersAfterParams, CancelAllOrdersAfterResult,
+    CancelAllParams, CancelAllResult, CancelOrderParams, CancelOrderResult, EditOrderParams,
+    EditOrderResult, Heartbeat, PingRequest, PongResponse, SubscribeParams, SubscriptionResult,
+    SystemStatusMessage, WsRequest,
 };
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -68,6 +70,34 @@ pub enum WsMessageEvent {
         req_id: Option<u64>,
         /// Edit result details.
         result: EditOrderResult,
+    },
+    /// Order amended successfully.
+    OrderAmended {
+        /// Request ID from the original request.
+        req_id: Option<u64>,
+        /// Amend result details.
+        result: AmendOrderResult,
+    },
+    /// Batch of orders added.
+    BatchOrdersAdded {
+        /// Request ID from the original request.
+        req_id: Option<u64>,
+        /// Results per order.
+        result: Vec<AddOrderResult>,
+    },
+    /// Batch of orders cancelled.
+    BatchOrdersCancelled {
+        /// Request ID from the original request.
+        req_id: Option<u64>,
+        /// Batch cancel result details.
+        result: BatchCancelResult,
+    },
+    /// Cancel-on-disconnect timer set.
+    CancelOnDisconnectSet {
+        /// Request ID from the original request.
+        req_id: Option<u64>,
+        /// Timer details.
+        result: CancelAllOrdersAfterResult,
     },
     /// Subscription/unsubscription error.
     Error { method: String, error: String, req_id: Option<u64> },
@@ -361,6 +391,67 @@ impl KrakenStream {
         Ok(req_id)
     }
 
+    /// Amend an existing order via WebSocket.
+    ///
+    /// Amending keeps the order ID and queue priority, unlike editing.
+    /// This requires an authenticated connection. Use `connect_private()` first.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use kraken_api_client::spot::ws::messages::AmendOrderParams;
+    /// use rust_decimal_macros::dec;
+    ///
+    /// let params = AmendOrderParams::by_order_id("OQCLML-BW3P3-BUCMWZ", &token)
+    ///     .limit_price(dec!(51000));
+    ///
+    /// stream.amend_order(params).await?;
+    /// ```
+    pub async fn amend_order(&mut self, params: AmendOrderParams) -> Result<u64, KrakenError> {
+        self.ensure_private()?;
+        let req_id = self.next_req_id();
+        let req = WsRequest::new("amend_order", params).with_req_id(req_id);
+        self.send_json(&req).await?;
+        Ok(req_id)
+    }
+
+    /// Place multiple orders in a single batch via WebSocket.
+    ///
+    /// This requires an authenticated connection. Use `connect_private()` first.
+    pub async fn batch_add(&mut self, params: BatchAddParams) -> Result<u64, KrakenError> {
+        self.ensure_private()?;
+        let req_id = self.next_req_id();
+        let req = WsRequest::new("batch_add", params).with_req_id(req_id);
+        self.send_json(&req).await?;
+        Ok(req_id)
+    }
+
+    /// Cancel multiple orders in a single batch via WebSocket.
+    ///
+    /// This requires an authenticated connection. Use `connect_private()` first.
+    pub async fn batch_cancel(&mut self, params: BatchCancelParams) -> Result<u64, KrakenError> {
+        self.ensure_private()?;
+        let req_id = self.next_req_id();
+        let req = WsRequest::new("batch_cancel", params).with_req_id(req_id);
+        self.send_json(&req).await?;
+        Ok(req_id)
+    }
+
+    /// Set a cancel-on-disconnect timer via WebSocket (dead man's switch).
+    ///
+    /// The timer must be refreshed before it expires, a timeout of 0 disables it.
+    /// This requires an authenticated connection. Use `connect_private()` first.
+    pub async fn cancel_all_orders_after(
+        &mut self,
+        params: CancelAllOrdersAfterParams,
+    ) -> Result<u64, KrakenError> {
+        self.ensure_private()?;
+        let req_id = self.next_req_id();
+        let req = WsRequest::new("cancel_all_orders_after", params).with_req_id(req_id);
+        self.send_json(&req).await?;
+        Ok(req_id)
+    }
+
     /// Ensure this is a private (authenticated) connection.
     fn ensure_private(&self) -> Result<(), KrakenError> {
         if self.token.is_none() {
@@ -608,6 +699,85 @@ impl KrakenStream {
                             return Some(WsMessageEvent::OrderEdited {
                                 req_id,
                                 result: edit_result,
+                            });
+                        }
+                    }
+                } else {
+                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    return Some(WsMessageEvent::Error {
+                        method: method.to_string(),
+                        error: error.to_string(),
+                        req_id,
+                    });
+                }
+            }
+            "amend_order" => {
+                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                if success {
+                    if let Some(result) = value.get("result") {
+                        if let Ok(amend_result) = serde_json::from_value::<AmendOrderResult>(result.clone()) {
+                            return Some(WsMessageEvent::OrderAmended {
+                                req_id,
+                                result: amend_result,
+                            });
+                        }
+                    }
+                } else {
+                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    return Some(WsMessageEvent::Error {
+                        method: method.to_string(),
+                        error: error.to_string(),
+                        req_id,
+                    });
+                }
+            }
+            "batch_add" => {
+                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                if success {
+                    if let Some(result) = value.get("result") {
+                        if let Ok(batch_result) = serde_json::from_value::<Vec<AddOrderResult>>(result.clone()) {
+                            return Some(WsMessageEvent::BatchOrdersAdded {
+                                req_id,
+                                result: batch_result,
+                            });
+                        }
+                    }
+                } else {
+                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    return Some(WsMessageEvent::Error {
+                        method: method.to_string(),
+                        error: error.to_string(),
+                        req_id,
+                    });
+                }
+            }
+            "batch_cancel" => {
+                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                if success {
+                    // The cancel count is reported at the top level, not inside `result`.
+                    if let Ok(batch_result) = serde_json::from_value::<BatchCancelResult>(value.clone()) {
+                        return Some(WsMessageEvent::BatchOrdersCancelled {
+                            req_id,
+                            result: batch_result,
+                        });
+                    }
+                } else {
+                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    return Some(WsMessageEvent::Error {
+                        method: method.to_string(),
+                        error: error.to_string(),
+                        req_id,
+                    });
+                }
+            }
+            "cancel_all_orders_after" => {
+                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                if success {
+                    if let Some(result) = value.get("result") {
+                        if let Ok(cod_result) = serde_json::from_value::<CancelAllOrdersAfterResult>(result.clone()) {
+                            return Some(WsMessageEvent::CancelOnDisconnectSet {
+                                req_id,
+                                result: cod_result,
                             });
                         }
                     }

@@ -586,6 +586,79 @@ pub struct FlexFuturesBalance {
     pub unrealized_pnl: Option<Decimal>,
 }
 
+/// Account log message (private).
+///
+/// Snapshots carry the `logs` list, updates carry `new_entry`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountLogMessage {
+    /// Feed name.
+    pub feed: String,
+    /// Log entries (snapshot).
+    #[serde(default)]
+    pub logs: Option<Vec<AccountLogEntry>>,
+    /// New log entry (update).
+    #[serde(default)]
+    pub new_entry: Option<AccountLogEntry>,
+}
+
+/// A single account log entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountLogEntry {
+    /// Entry ID.
+    pub id: u64,
+    /// Entry date.
+    #[serde(default)]
+    pub date: Option<String>,
+    /// Asset.
+    #[serde(default)]
+    pub asset: Option<String>,
+    /// Entry description.
+    #[serde(default)]
+    pub info: Option<String>,
+    /// Booking UID.
+    #[serde(default)]
+    pub booking_uid: Option<String>,
+    /// Margin account.
+    #[serde(default)]
+    pub margin_account: Option<String>,
+    /// Balance before the entry.
+    #[serde(default)]
+    pub old_balance: Option<Decimal>,
+    /// Balance after the entry.
+    #[serde(default)]
+    pub new_balance: Option<Decimal>,
+    /// Average entry price before.
+    #[serde(default)]
+    pub old_average_entry_price: Option<Decimal>,
+    /// Average entry price after.
+    #[serde(default)]
+    pub new_average_entry_price: Option<Decimal>,
+    /// Trade price.
+    #[serde(default)]
+    pub trade_price: Option<Decimal>,
+    /// Mark price.
+    #[serde(default)]
+    pub mark_price: Option<Decimal>,
+    /// Realized PnL.
+    #[serde(default)]
+    pub realized_pnl: Option<Decimal>,
+    /// Fee.
+    #[serde(default)]
+    pub fee: Option<Decimal>,
+    /// Execution ID.
+    #[serde(default)]
+    pub execution: Option<String>,
+    /// Collateral asset.
+    #[serde(default)]
+    pub collateral: Option<String>,
+    /// Funding rate.
+    #[serde(default)]
+    pub funding_rate: Option<Decimal>,
+    /// Realized funding.
+    #[serde(default)]
+    pub realized_funding: Option<Decimal>,
+}
+
 
 // Tests
 
