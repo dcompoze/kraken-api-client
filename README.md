@@ -90,8 +90,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Spot WebSocket v2 (market data) | ✓ | ticker, book, level3, trade, ohlc, instrument channels |
 | Spot WebSocket v2 (user data) | ✓ | executions, balances channels (via GetWebSocketsToken) |
 | Spot WebSocket v2 (trading) | ✓ | add_order, cancel_order, cancel_all, edit_order, amend_order, batch_add, batch_cancel, cancel_all_orders_after |
-| Futures REST (public) | ✓ | tickers, orderbook, history, instruments, fee schedules, historical funding rates, charts |
+| Futures REST (public) | ✓ | tickers, orderbook, history, instruments, instrument status, fee schedules, historical funding rates, charts |
 | Futures REST (private) | ✓ | accounts, open positions, open orders, fills, send/edit/cancel order, batch orders, transfers, withdrawal, account log, notifications, leverage and PnL preferences, unwind queue |
+| Futures REST (sub-accounts) | ✓ | list sub-accounts with holding, futures, and flex account balances |
+| Futures REST (market history) | ✓ | historical order, execution, and trigger events, account log CSV export |
 | Futures WebSocket | ✓ | Public and private feed subscriptions with challenge authentication |
 
 ## Credentials

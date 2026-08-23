@@ -26,6 +26,9 @@ pub mod public {
     /// Get historical funding rates.
     pub const HISTORICAL_FUNDING_RATES: &str = "/api/v4/historicalfundingrates";
 
+    /// Get status information for all instruments.
+    pub const INSTRUMENTS_STATUS: &str = "/api/v3/instruments/status";
+
     /// Base path for OHLC chart data.
     /// This path is served from the domain root, not under `/derivatives`.
     pub const CHARTS: &str = "/api/charts/v1";
@@ -75,9 +78,28 @@ pub mod private {
     /// Withdraw funds from the futures wallet to the spot wallet.
     pub const WITHDRAWAL: &str = "/api/v3/withdrawal";
 
+    /// List sub-accounts.
+    pub const SUBACCOUNTS: &str = "/api/v3/subaccounts";
+
     /// Get account log entries.
     /// This path is served from the domain root, not under `/derivatives`.
     pub const ACCOUNT_LOG: &str = "/api/history/v2/account-log";
+
+    /// Get the account log as CSV.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const ACCOUNT_LOG_CSV: &str = "/api/history/v2/accountlogcsv";
+
+    /// Get historical order events.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const HISTORY_ORDERS: &str = "/api/history/v2/orders";
+
+    /// Get historical execution events.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const HISTORY_EXECUTIONS: &str = "/api/history/v2/executions";
+
+    /// Get historical trigger events.
+    /// This path is served from the domain root, not under `/derivatives`.
+    pub const HISTORY_TRIGGERS: &str = "/api/history/v2/triggers";
 
     /// Get the latest notifications.
     pub const NOTIFICATIONS: &str = "/api/v3/notifications";

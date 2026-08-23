@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "kraken-api-client"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64",
  "crc32fast",

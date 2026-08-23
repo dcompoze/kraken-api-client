@@ -9,7 +9,7 @@ name = "kraken-api-client"
 readme = "README.md"
 repository = "https://github.com/dcompoze/kraken-api-client"
 rust-version = "1.85"
-version = "1.1.0"
+version = "1.2.0"
 
 [lib]
 name = "kraken_api_client"

@@ -156,6 +156,55 @@ impl FuturesRestClient {
         self.parse_futures_response(response).await
     }
 
+    /// Make an authenticated GET request that returns the raw response body.
+    ///
+    /// A JSON error body is still detected and returned as an error.
+    pub(crate) async fn private_get_bytes(&self, endpoint: &str) -> Result<Vec<u8>, KrakenError> {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KrakenError::MissingCredentials)?;
+
+        let nonce = self.nonce_provider.next_nonce();
+        let creds = credentials.get_credentials();
+
+        let signature = sign_futures_request(creds, endpoint, nonce, "")?;
+
+        let url = self.endpoint_url(endpoint);
+        let response = self
+            .http_client
+            .get(&url)
+            .header("APIKey", &creds.api_key)
+            .header("Authent", signature)
+            .header("Nonce", nonce.to_string())
+            .send()
+            .await?;
+
+        let status = response.status();
+        let bytes = response.bytes().await?.to_vec();
+
+        if let Ok(error_response) = serde_json::from_slice::<FuturesErrorResponse>(&bytes) {
+            if error_response.result == "error" {
+                return Err(KrakenError::Api(crate::error::ApiError::new(
+                    "EFutures",
+                    error_response
+                        .error
+                        .unwrap_or_else(|| "Unknown error".to_string()),
+                )));
+            }
+        }
+
+        if !status.is_success() {
+            return Err(KrakenError::InvalidResponse(format!(
+                "HTTP {}: {}",
+                status,
+                String::from_utf8_lossy(&bytes)
+            )));
+        }
+
+        Ok(bytes)
+    }
+
     /// Make an authenticated PUT request.
     ///
     /// The Futures API expects PUT parameters in the query string.
@@ -323,6 +372,22 @@ impl FuturesRestClient {
     pub async fn get_instruments(&self) -> Result<Vec<FuturesInstrument>, KrakenError> {
         let response: InstrumentsResponse = self.public_get(public::INSTRUMENTS).await?;
         Ok(response.instruments)
+    }
+
+    /// Get dislocation and volatility status for all instruments.
+    pub async fn get_instruments_status(&self) -> Result<Vec<InstrumentStatus>, KrakenError> {
+        let response: InstrumentsStatusResponse =
+            self.public_get(public::INSTRUMENTS_STATUS).await?;
+        Ok(response.instrument_status)
+    }
+
+    /// Get dislocation and volatility status for a single instrument.
+    pub async fn get_instrument_status(
+        &self,
+        symbol: &str,
+    ) -> Result<InstrumentStatus, KrakenError> {
+        let endpoint = format!("/api/v3/instruments/{}/status", symbol);
+        self.public_get(&endpoint).await
     }
 
     /// Get all fee schedules with their tiers.
@@ -561,6 +626,56 @@ impl FuturesRestClient {
             }
             None => self.private_get(private::ACCOUNT_LOG).await,
         }
+    }
+
+    /// Get the account log as raw CSV bytes.
+    ///
+    /// This endpoint is not available in the demo environment.
+    pub async fn get_account_log_csv(&self) -> Result<Vec<u8>, KrakenError> {
+        self.private_get_bytes(private::ACCOUNT_LOG_CSV).await
+    }
+
+    /// Get historical order events.
+    pub async fn get_order_events(
+        &self,
+        request: Option<&HistoryEventsRequest>,
+    ) -> Result<HistoryEventsResponse, KrakenError> {
+        self.get_history_events(private::HISTORY_ORDERS, request)
+            .await
+    }
+
+    /// Get historical execution events.
+    pub async fn get_execution_events(
+        &self,
+        request: Option<&HistoryEventsRequest>,
+    ) -> Result<HistoryEventsResponse, KrakenError> {
+        self.get_history_events(private::HISTORY_EXECUTIONS, request)
+            .await
+    }
+
+    /// Get historical trigger events.
+    pub async fn get_trigger_events(
+        &self,
+        request: Option<&HistoryEventsRequest>,
+    ) -> Result<HistoryEventsResponse, KrakenError> {
+        self.get_history_events(private::HISTORY_TRIGGERS, request)
+            .await
+    }
+
+    async fn get_history_events(
+        &self,
+        endpoint: &str,
+        request: Option<&HistoryEventsRequest>,
+    ) -> Result<HistoryEventsResponse, KrakenError> {
+        match request {
+            Some(req) => self.private_get_with_params(endpoint, req).await,
+            None => self.private_get(endpoint).await,
+        }
+    }
+
+    /// List sub-accounts of the master account.
+    pub async fn get_subaccounts(&self) -> Result<SubaccountsResponse, KrakenError> {
+        self.private_get(private::SUBACCOUNTS).await
     }
 
     /// Get the latest notifications.

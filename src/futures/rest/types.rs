@@ -1029,6 +1029,151 @@ pub struct OrderStatusDetails {
     pub last_update_timestamp: Option<String>,
 }
 
+/// Status information for a single instrument.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InstrumentStatus {
+    /// Futures symbol
+    pub tradeable: String,
+    /// Whether the market price is dislocated
+    #[serde(rename = "experiencingDislocation")]
+    pub experiencing_dislocation: bool,
+    /// Dislocation direction, `ABOVE_UPPER_BOUND` or `BELOW_LOWER_BOUND`
+    #[serde(default, rename = "priceDislocationDirection")]
+    pub price_dislocation_direction: Option<String>,
+    /// Whether the market is experiencing extreme volatility
+    #[serde(rename = "experiencingExtremeVolatility")]
+    pub experiencing_extreme_volatility: bool,
+    /// Initial margin multiplier applied during extreme volatility
+    #[serde(default, rename = "extremeVolatilityInitialMarginMultiplier")]
+    pub extreme_volatility_initial_margin_multiplier: Option<f64>,
+}
+
+/// Response for the instrument status list endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InstrumentsStatusResponse {
+    /// Result status
+    pub result: String,
+    /// Status of each instrument
+    #[serde(rename = "instrumentStatus")]
+    pub instrument_status: Vec<InstrumentStatus>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// A holding account balance of a sub-account.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubaccountHolding {
+    /// Currency code
+    pub currency: String,
+    /// Balance amount
+    pub amount: f64,
+}
+
+/// A futures margin account of a sub-account.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubaccountFuturesAccount {
+    /// Account name
+    pub name: String,
+    /// Available margin
+    #[serde(rename = "availableMargin")]
+    pub available_margin: f64,
+}
+
+/// A sub-account of the master account.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Subaccount {
+    /// Sub-account UID
+    #[serde(rename = "accountUid")]
+    pub account_uid: String,
+    /// Sub-account email
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Sub-account full name
+    #[serde(default, rename = "fullName")]
+    pub full_name: Option<String>,
+    /// Holding account balances
+    #[serde(default, rename = "holdingAccounts")]
+    pub holding_accounts: Vec<SubaccountHolding>,
+    /// Futures margin accounts
+    #[serde(default, rename = "futuresAccounts")]
+    pub futures_accounts: Vec<SubaccountFuturesAccount>,
+    /// Multi-collateral flex account details
+    #[serde(default, rename = "flexAccount")]
+    pub flex_account: Option<serde_json::Value>,
+}
+
+/// Response for the sub-accounts endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubaccountsResponse {
+    /// Result status
+    pub result: String,
+    /// Master account UID
+    #[serde(rename = "masterAccountUid")]
+    pub master_account_uid: String,
+    /// Sub-accounts owned by the master account
+    #[serde(default)]
+    pub subaccounts: Vec<Subaccount>,
+    /// Server time
+    #[serde(rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
+/// Request parameters for the historical event endpoints.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HistoryEventsRequest {
+    /// Return events before this timestamp in milliseconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<u64>,
+    /// Token from a previous response to continue pagination
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation_token: Option<String>,
+    /// Return events after this timestamp in milliseconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
+    /// Sort order, `asc` or `desc`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    /// Filter by futures symbol
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tradeable: Option<String>,
+}
+
+/// A single historical event.
+///
+/// The `event` payload varies by endpoint and event kind (order placed,
+/// execution, trigger, and so on), so it is kept as raw JSON.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryEvent {
+    /// Event UID
+    #[serde(default)]
+    pub uid: Option<String>,
+    /// Event timestamp in milliseconds
+    pub timestamp: i64,
+    /// Event payload
+    pub event: serde_json::Value,
+}
+
+/// Response for the historical event endpoints.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryEventsResponse {
+    /// Account UID
+    #[serde(default, rename = "accountUid")]
+    pub account_uid: Option<String>,
+    /// Events in this page
+    #[serde(default)]
+    pub elements: Vec<HistoryEvent>,
+    /// Number of events in this page
+    #[serde(default)]
+    pub len: Option<u64>,
+    /// Token to request the next page
+    #[serde(default, rename = "continuationToken")]
+    pub continuation_token: Option<String>,
+    /// Server time
+    #[serde(default, rename = "serverTime")]
+    pub server_time: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1083,6 +1228,81 @@ mod tests {
             .cancel("order-to-cancel");
 
         assert_eq!(batch.batch_order.len(), 2);
+    }
+
+    #[test]
+    fn test_deserialize_instruments_status_response() {
+        let json = r#"{
+            "result": "success",
+            "instrumentStatus": [{
+                "tradeable": "PF_BTCUSD",
+                "experiencingDislocation": false,
+                "priceDislocationDirection": null,
+                "experiencingExtremeVolatility": false,
+                "extremeVolatilityInitialMarginMultiplier": 1
+            }],
+            "serverTime": "2024-01-15T10:00:00Z"
+        }"#;
+
+        let response: InstrumentsStatusResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.instrument_status.len(), 1);
+        assert_eq!(response.instrument_status[0].tradeable, "PF_BTCUSD");
+        assert!(!response.instrument_status[0].experiencing_dislocation);
+    }
+
+    #[test]
+    fn test_deserialize_subaccounts_response() {
+        let json = r#"{
+            "result": "success",
+            "serverTime": "2024-01-15T10:00:00Z",
+            "masterAccountUid": "f7d5571c-6d10-4cf1-944a-048d25682ed0",
+            "subaccounts": [{
+                "accountUid": "aa2f70eb-d3e6-4d0b-9a4b-1a3d5e2f7a10",
+                "email": "sub@example.com",
+                "fullName": null,
+                "holdingAccounts": [{"currency": "usd", "amount": 12.5}],
+                "futuresAccounts": [{"name": "f-xbt:usd", "availableMargin": 1.25}]
+            }]
+        }"#;
+
+        let response: SubaccountsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.subaccounts.len(), 1);
+        assert_eq!(response.subaccounts[0].holding_accounts[0].currency, "usd");
+        assert_eq!(response.subaccounts[0].futures_accounts[0].name, "f-xbt:usd");
+    }
+
+    #[test]
+    fn test_deserialize_history_events_response() {
+        let json = r#"{
+            "accountUid": "f7d5571c-6d10-4cf1-944a-048d25682ed0",
+            "continuationToken": "alp81a",
+            "elements": [{
+                "uid": "b0a4b8e1-4e0b-4a52-9c37-6b4d1f7a9d2e",
+                "timestamp": 1605126171852,
+                "event": {"OrderPlaced": {"reason": "new_user_order"}}
+            }],
+            "len": 1,
+            "serverTime": "2024-01-15T10:00:00Z"
+        }"#;
+
+        let response: HistoryEventsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.elements.len(), 1);
+        assert_eq!(response.elements[0].timestamp, 1605126171852);
+        assert_eq!(response.continuation_token.as_deref(), Some("alp81a"));
+        assert!(response.elements[0].event.get("OrderPlaced").is_some());
+    }
+
+    #[test]
+    fn test_serialize_history_events_request() {
+        let request = HistoryEventsRequest {
+            since: Some(1668989233),
+            sort: Some("asc".to_string()),
+            tradeable: Some("PF_SOLUSD".to_string()),
+            ..Default::default()
+        };
+
+        let query = serde_urlencoded::to_string(&request).unwrap();
+        assert_eq!(query, "since=1668989233&sort=asc&tradeable=PF_SOLUSD");
     }
 
     #[test]
