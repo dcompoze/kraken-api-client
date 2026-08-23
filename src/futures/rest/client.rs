@@ -89,12 +89,12 @@ impl FuturesRestClient {
     /// the `/derivatives` prefix, so the prefix is stripped from the base URL
     /// for those paths.
     fn endpoint_url(&self, endpoint: &str) -> String {
+        // Tolerate a trailing slash on custom base URLs.
+        let base = self.base_url.trim_end_matches('/');
         let base = if endpoint.starts_with("/api/charts") || endpoint.starts_with("/api/history") {
-            self.base_url
-                .strip_suffix("/derivatives")
-                .unwrap_or(&self.base_url)
+            base.strip_suffix("/derivatives").unwrap_or(base)
         } else {
-            &self.base_url
+            base
         };
         format!("{}{}", base, endpoint)
     }
@@ -831,6 +831,10 @@ impl FuturesRestClientBuilder {
     }
 
     /// Set the base URL (useful for testing with a mock server).
+    ///
+    /// Chart and history endpoints are routed to the domain root by stripping
+    /// a `/derivatives` suffix from this URL.
+    /// A base URL without that suffix serves all endpoints from one root.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self

@@ -158,7 +158,8 @@ impl TradingRateLimiter {
         self.update_counter();
 
         // Get the order age and calculate penalty
-        let penalty = if let Some((_, age)) = self.orders.remove_with_age(&order_id.to_string()) {
+        let key = order_id.to_string();
+        let penalty = if let Some(age) = self.orders.get_age(&key) {
             Self::cancel_penalty(age)
         } else {
             // Order not tracked, assume worst case
@@ -169,6 +170,10 @@ impl TradingRateLimiter {
 
         if self.counter + cost <= self.max_counter {
             self.counter += cost;
+            // Remove the entry only once the penalty is charged.
+            // A rate limited attempt keeps the order tracked so the retry
+            // uses the real order age instead of the worst case penalty.
+            self.orders.remove(&key);
             Ok(penalty)
         } else {
             // Calculate wait time

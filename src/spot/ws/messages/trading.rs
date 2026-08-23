@@ -419,6 +419,9 @@ pub struct BatchAddOrder {
     /// Display quantity (for iceberg orders).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_qty: Option<Decimal>,
+    /// Fee preference ("base" or "quote").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee_preference: Option<String>,
 }
 
 impl BatchAddOrder {
@@ -436,6 +439,7 @@ impl BatchAddOrder {
             post_only: None,
             reduce_only: None,
             display_qty: None,
+            fee_preference: None,
         }
     }
 

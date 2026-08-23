@@ -1,31 +1,69 @@
 //! Local order book maintenance and CRC32 checksum validation.
 //!
 //! Kraken sends a `checksum` field with every book message.
-//! The checksum is a CRC32 over the top 10 asks and top 10 bids, with prices
-//! and quantities formatted to the pair's precision, decimal points removed,
-//! and leading zeros stripped.
+//! The checksum is a CRC32 over the top 10 asks and top 10 bids of the book
+//! that results from applying the message, with prices and quantities
+//! formatted to the pair's precision, decimal points removed, and leading
+//! zeros stripped.
 //! The required precisions come from the `AssetPairs` REST endpoint
 //! (`pair_decimals` and `lot_decimals`).
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use rust_decimal::Decimal;
 
 use crate::spot::ws::messages::{BookData, BookLevel};
 
-/// Format a value for checksum hashing.
+/// Feed one value's checksum digits to the hasher.
 ///
-/// The value is formatted with a fixed number of decimals, then the decimal
-/// point and leading zeros are removed.
-fn format_for_checksum(value: Decimal, decimals: u32) -> String {
-    let formatted = format!("{:.*}", decimals as usize, value);
-    let without_point = formatted.replace('.', "");
-    let trimmed = without_point.trim_start_matches('0');
-    if trimmed.is_empty() {
-        "0".to_string()
+/// The value is formatted with a fixed number of decimals into `buf`, then
+/// the decimal point and leading zeros are skipped.
+fn hash_value(hasher: &mut crc32fast::Hasher, buf: &mut String, value: Decimal, decimals: u32) {
+    buf.clear();
+    let _ = write!(buf, "{:.*}", decimals as usize, value);
+
+    let (int_part, frac_part) = match buf.split_once('.') {
+        Some((int_part, frac_part)) => (int_part, frac_part),
+        None => (buf.as_str(), ""),
+    };
+
+    let int_trimmed = int_part.trim_start_matches('0');
+    if int_trimmed.is_empty() {
+        let frac_trimmed = frac_part.trim_start_matches('0');
+        if frac_trimmed.is_empty() {
+            hasher.update(b"0");
+        } else {
+            hasher.update(frac_trimmed.as_bytes());
+        }
     } else {
-        trimmed.to_string()
+        hasher.update(int_trimmed.as_bytes());
+        hasher.update(frac_part.as_bytes());
     }
+}
+
+/// Compute the CRC32 checksum over iterators of (price, quantity) levels.
+///
+/// `asks` must be sorted ascending by price and `bids` descending.
+/// Only the first 10 levels of each side are included.
+fn checksum_levels<A, B>(asks: A, bids: B, price_decimals: u32, qty_decimals: u32) -> u32
+where
+    A: Iterator<Item = (Decimal, Decimal)>,
+    B: Iterator<Item = (Decimal, Decimal)>,
+{
+    let mut hasher = crc32fast::Hasher::new();
+    let mut buf = String::new();
+
+    for (price, qty) in asks.take(10) {
+        hash_value(&mut hasher, &mut buf, price, price_decimals);
+        hash_value(&mut hasher, &mut buf, qty, qty_decimals);
+    }
+    for (price, qty) in bids.take(10) {
+        hash_value(&mut hasher, &mut buf, price, price_decimals);
+        hash_value(&mut hasher, &mut buf, qty, qty_decimals);
+    }
+
+    hasher.finalize()
 }
 
 /// Compute the CRC32 checksum for the given book sides.
@@ -39,22 +77,16 @@ pub fn book_checksum(
     price_decimals: u32,
     qty_decimals: u32,
 ) -> u32 {
-    let mut hasher = crc32fast::Hasher::new();
-
-    for level in asks.iter().take(10) {
-        hasher.update(format_for_checksum(level.price, price_decimals).as_bytes());
-        hasher.update(format_for_checksum(level.qty, qty_decimals).as_bytes());
-    }
-    for level in bids.iter().take(10) {
-        hasher.update(format_for_checksum(level.price, price_decimals).as_bytes());
-        hasher.update(format_for_checksum(level.qty, qty_decimals).as_bytes());
-    }
-
-    hasher.finalize()
+    checksum_levels(
+        asks.iter().map(|level| (level.price, level.qty)),
+        bids.iter().map(|level| (level.price, level.qty)),
+        price_decimals,
+        qty_decimals,
+    )
 }
 
 impl BookData {
-    /// Compute the CRC32 checksum of this book data.
+    /// Compute the CRC32 checksum of the levels in this message.
     ///
     /// `price_decimals` and `qty_decimals` are the pair's `pair_decimals` and
     /// `lot_decimals` from the `AssetPairs` REST endpoint.
@@ -62,7 +94,13 @@ impl BookData {
         book_checksum(&self.asks, &self.bids, price_decimals, qty_decimals)
     }
 
-    /// Validate this book data against its embedded checksum.
+    /// Validate a snapshot message against its embedded checksum.
+    ///
+    /// Only valid for snapshot messages.
+    /// The checksum on an update message covers the top 10 levels of the book
+    /// that results from applying the update, not the levels in the message,
+    /// so update messages must be validated with [`OrderBookState::validate`]
+    /// after [`OrderBookState::apply_update`].
     ///
     /// Returns `None` when the message carries no checksum.
     pub fn validate_checksum(&self, price_decimals: u32, qty_decimals: u32) -> Option<bool> {
@@ -148,12 +186,10 @@ impl OrderBookState {
 
         // Bids keep the highest prices, asks keep the lowest.
         while self.bids.len() > self.depth {
-            let lowest = *self.bids.keys().next().unwrap();
-            self.bids.remove(&lowest);
+            self.bids.pop_first();
         }
         while self.asks.len() > self.depth {
-            let highest = *self.asks.keys().next_back().unwrap();
-            self.asks.remove(&highest);
+            self.asks.pop_last();
         }
     }
 
@@ -186,9 +222,9 @@ impl OrderBookState {
 
     /// Compute the CRC32 checksum of the current book state.
     pub fn checksum(&self) -> u32 {
-        book_checksum(
-            &self.asks(),
-            &self.bids(),
+        checksum_levels(
+            self.asks.iter().map(|(p, q)| (*p, *q)),
+            self.bids.iter().rev().map(|(p, q)| (*p, *q)),
             self.price_decimals,
             self.qty_decimals,
         )
@@ -315,17 +351,25 @@ mod tests {
         assert_eq!(book.bids().len(), 10);
     }
 
+    fn hashed_value(value: &str, decimals: u32) -> u32 {
+        let mut hasher = crc32fast::Hasher::new();
+        let mut buf = String::new();
+        hash_value(
+            &mut hasher,
+            &mut buf,
+            Decimal::from_str(value).unwrap(),
+            decimals,
+        );
+        hasher.finalize()
+    }
+
     #[test]
-    fn test_format_strips_point_and_leading_zeros() {
-        assert_eq!(
-            format_for_checksum(Decimal::from_str("0.00011621").unwrap(), 8),
-            "11621"
-        );
-        assert_eq!(
-            format_for_checksum(Decimal::from_str("29430.2").unwrap(), 1),
-            "294302"
-        );
+    fn test_hash_strips_point_and_leading_zeros() {
+        assert_eq!(hashed_value("0.00011621", 8), crc32fast::hash(b"11621"));
+        assert_eq!(hashed_value("29430.2", 1), crc32fast::hash(b"294302"));
         // Trailing zeros are preserved by the fixed precision.
-        assert_eq!(format_for_checksum(Decimal::from_str("4.0").unwrap(), 8), "400000000");
+        assert_eq!(hashed_value("4.0", 8), crc32fast::hash(b"400000000"));
+        // An all-zero value hashes as a single zero digit.
+        assert_eq!(hashed_value("0", 4), crc32fast::hash(b"0"));
     }
 }

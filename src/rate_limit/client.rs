@@ -677,11 +677,26 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         &self,
         request: &AddOrderBatchRequest,
     ) -> Result<AddOrderBatchResponse, KrakenError> {
-        self.wait_private().await?;
+        // Batched orders count against the trading counter like single orders,
+        // so charge capacity for each order before sending the request.
+        let base = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut temp_ids = Vec::with_capacity(request.orders.len());
+        for index in 0..request.orders.len() {
+            let temp_id = format!("pending_{}_{}", base, index);
+            self.wait_trading_order(&temp_id, &request.pair).await?;
+            temp_ids.push(temp_id);
+        }
+
         let result = self.inner.add_order_batch(request).await?;
 
-        // Track placed orders so later cancellations get correct age penalties.
+        // Replace the temporary entries with the real order IDs.
         let mut limiter = self.trading_limiter.lock().await;
+        for temp_id in &temp_ids {
+            limiter.order_cancelled(temp_id);
+        }
         for order in &result.orders {
             if let Some(txid) = &order.txid {
                 limiter.track_order(txid.to_string(), OrderTrackingInfo::new(&request.pair));
@@ -695,8 +710,22 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         &self,
         request: &AmendOrderRequest,
     ) -> Result<AmendOrderResponse, KrakenError> {
-        self.wait_private().await?;
-        self.inner.amend_order(request).await
+        // Amends count against the trading counter with the age based penalty,
+        // the same schedule that applies to edits.
+        // Amends by client order ID are not tracked, so they take the worst case.
+        let id = request.txid.as_deref().or(request.cl_ord_id.as_deref());
+        if let Some(id) = id {
+            self.wait_trading_cancel(id).await?;
+        }
+        let result = self.inner.amend_order(request).await?;
+
+        // The order stays open under the same transaction ID, so track it again.
+        if let Some(txid) = &request.txid {
+            let mut limiter = self.trading_limiter.lock().await;
+            limiter.track_order(txid.to_string(), OrderTrackingInfo::new(""));
+        }
+
+        Ok(result)
     }
 
     async fn edit_order(
@@ -743,10 +772,20 @@ impl<C: KrakenClient> KrakenClient for RateLimitedClient<C> {
         &self,
         request: &CancelOrderBatchRequest,
     ) -> Result<CancelOrderResponse, KrakenError> {
-        // Apply the age-based penalty for each tracked order in the batch.
+        // Apply the age-based penalty for every order in the batch.
+        // Orders identified by user reference or client order ID are not
+        // tracked by transaction ID, so they take the worst case penalty.
         for order in &request.orders {
-            if let BatchCancelId::Txid(txid) = order {
-                self.wait_trading_cancel(txid).await?;
+            match order {
+                BatchCancelId::Txid(txid) => self.wait_trading_cancel(txid).await?,
+                BatchCancelId::Userref(userref) => {
+                    self.wait_trading_cancel(&userref.to_string()).await?
+                }
+            }
+        }
+        if let Some(cl_ord_ids) = &request.cl_ord_ids {
+            for id in cl_ord_ids {
+                self.wait_trading_cancel(id).await?;
             }
         }
         self.inner.cancel_order_batch(request).await

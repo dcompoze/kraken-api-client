@@ -275,6 +275,7 @@ impl SpotRestClient {
             .send()
             .await?;
 
+        let status = response.status();
         let bytes = response.bytes().await?.to_vec();
 
         // An error response comes back as the usual JSON envelope.
@@ -288,7 +289,21 @@ impl SpotRestClient {
                     }
                     return Err(KrakenError::Api(api_error));
                 }
+                return Err(KrakenError::InvalidResponse(format!(
+                    "API error: {}",
+                    parsed.error.join(", ")
+                )));
             }
+        }
+
+        // Report data is not JSON, so a failed HTTP status is the only signal
+        // that the body is not a report.
+        if !status.is_success() {
+            return Err(KrakenError::InvalidResponse(format!(
+                "HTTP {}: {}",
+                status,
+                String::from_utf8_lossy(&bytes)
+            )));
         }
 
         Ok(bytes)

@@ -188,7 +188,7 @@ impl SpotRestClient {
         self.private_post_json(private::ORDER_AMENDS, request).await
     }
 
-    // ========== Export Endpoints ==========
+    // Export Endpoints.
 
     /// Request generation of an export report.
     pub async fn add_export(
@@ -223,7 +223,7 @@ impl SpotRestClient {
         self.private_post(private::REMOVE_EXPORT, request).await
     }
 
-    // ========== Subaccount Endpoints ==========
+    // Subaccount Endpoints.
 
     /// Create a trading subaccount.
     pub async fn create_subaccount(
@@ -241,7 +241,7 @@ impl SpotRestClient {
         self.private_post(private::ACCOUNT_TRANSFER, request).await
     }
 
-    // ========== Funding Endpoints ==========
+    // Funding Endpoints.
 
     /// Get available deposit methods for an asset.
     pub async fn get_deposit_methods(
@@ -353,7 +353,7 @@ impl SpotRestClient {
         self.private_post(private::WALLET_TRANSFER, request).await
     }
 
-    // ========== Earn Endpoints ==========
+    // Earn Endpoints.
 
     /// Allocate funds to an earn strategy.
     pub async fn earn_allocate(&self, request: &EarnAllocateRequest) -> Result<bool, KrakenError> {

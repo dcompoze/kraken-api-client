@@ -58,7 +58,7 @@ use crate::spot::rest::public::{
 ///
 /// All methods are async and return `Result<T, KrakenError>`.
 pub trait KrakenClient: Send + Sync {
-    // ========== Public Endpoints ==========
+    // Public Endpoints.
 
     /// Get the server time.
     fn get_server_time(&self) -> impl Future<Output = Result<ServerTime, KrakenError>> + Send;
@@ -108,7 +108,7 @@ pub trait KrakenClient: Send + Sync {
         request: &RecentSpreadsRequest,
     ) -> impl Future<Output = Result<RecentSpreadsResponse, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Account ==========
+    // Private Endpoints - Account.
 
     /// Get account balance.
     fn get_account_balance(
@@ -186,7 +186,7 @@ pub trait KrakenClient: Send + Sync {
         request: &OrderAmendsRequest,
     ) -> impl Future<Output = Result<OrderAmends, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Export ==========
+    // Private Endpoints - Export.
 
     /// Request generation of an export report.
     fn add_export(
@@ -212,7 +212,7 @@ pub trait KrakenClient: Send + Sync {
         request: &RemoveExportRequest,
     ) -> impl Future<Output = Result<RemoveExportResponse, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Subaccounts ==========
+    // Private Endpoints - Subaccounts.
 
     /// Create a trading subaccount.
     fn create_subaccount(
@@ -226,7 +226,7 @@ pub trait KrakenClient: Send + Sync {
         request: &AccountTransferRequest,
     ) -> impl Future<Output = Result<AccountTransferResponse, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Funding ==========
+    // Private Endpoints - Funding.
 
     /// Get available deposit methods.
     fn get_deposit_methods(
@@ -288,7 +288,7 @@ pub trait KrakenClient: Send + Sync {
         request: &WalletTransferRequest,
     ) -> impl Future<Output = Result<ConfirmationRefId, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Earn ==========
+    // Private Endpoints - Earn.
 
     /// Allocate funds to an earn strategy.
     fn earn_allocate(
@@ -326,7 +326,7 @@ pub trait KrakenClient: Send + Sync {
         request: Option<&EarnAllocationsRequest>,
     ) -> impl Future<Output = Result<EarnAllocations, KrakenError>> + Send;
 
-    // ========== Private Endpoints - Trading ==========
+    // Private Endpoints - Trading.
 
     /// Add a new order.
     fn add_order(
@@ -375,7 +375,7 @@ pub trait KrakenClient: Send + Sync {
         request: &CancelOrderBatchRequest,
     ) -> impl Future<Output = Result<CancelOrderResponse, KrakenError>> + Send;
 
-    // ========== Private Endpoints - WebSocket ==========
+    // Private Endpoints - WebSocket.
 
     /// Get a WebSocket authentication token.
     fn get_websocket_token(
@@ -388,7 +388,7 @@ pub trait KrakenClient: Send + Sync {
 /// This allows using `KrakenClient` as a trait object via `Box<dyn KrakenClientExt>`.
 #[allow(async_fn_in_trait)]
 pub trait KrakenClientExt: Send + Sync {
-    // ========== Public Endpoints ==========
+    // Public Endpoints.
 
     async fn get_server_time(&self) -> Result<ServerTime, KrakenError>;
     async fn get_system_status(&self) -> Result<SystemStatus, KrakenError>;
@@ -415,7 +415,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &RecentSpreadsRequest,
     ) -> Result<RecentSpreadsResponse, KrakenError>;
 
-    // ========== Private Endpoints - Account ==========
+    // Private Endpoints - Account.
 
     async fn get_account_balance(&self) -> Result<HashMap<String, Decimal>, KrakenError>;
     async fn get_extended_balance(&self) -> Result<ExtendedBalances, KrakenError>;
@@ -464,7 +464,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &OrderAmendsRequest,
     ) -> Result<OrderAmends, KrakenError>;
 
-    // ========== Private Endpoints - Export ==========
+    // Private Endpoints - Export.
 
     async fn add_export(&self, request: &AddExportRequest)
     -> Result<AddExportResponse, KrakenError>;
@@ -481,7 +481,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &RemoveExportRequest,
     ) -> Result<RemoveExportResponse, KrakenError>;
 
-    // ========== Private Endpoints - Subaccounts ==========
+    // Private Endpoints - Subaccounts.
 
     async fn create_subaccount(
         &self,
@@ -492,7 +492,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &AccountTransferRequest,
     ) -> Result<AccountTransferResponse, KrakenError>;
 
-    // ========== Private Endpoints - Funding ==========
+    // Private Endpoints - Funding.
 
     async fn get_deposit_methods(
         &self,
@@ -532,7 +532,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &WalletTransferRequest,
     ) -> Result<ConfirmationRefId, KrakenError>;
 
-    // ========== Private Endpoints - Earn ==========
+    // Private Endpoints - Earn.
 
     async fn earn_allocate(&self, request: &EarnAllocateRequest) -> Result<bool, KrakenError>;
     async fn earn_deallocate(&self, request: &EarnAllocateRequest) -> Result<bool, KrakenError>;
@@ -553,7 +553,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: Option<&EarnAllocationsRequest>,
     ) -> Result<EarnAllocations, KrakenError>;
 
-    // ========== Private Endpoints - Trading ==========
+    // Private Endpoints - Trading.
 
     async fn add_order(&self, request: &AddOrderRequest) -> Result<AddOrderResponse, KrakenError>;
     async fn add_order_batch(
@@ -582,7 +582,7 @@ pub trait KrakenClientExt: Send + Sync {
         request: &CancelOrderBatchRequest,
     ) -> Result<CancelOrderResponse, KrakenError>;
 
-    // ========== Private Endpoints - WebSocket ==========
+    // Private Endpoints - WebSocket.
 
     async fn get_websocket_token(&self) -> Result<WebSocketToken, KrakenError>;
 }

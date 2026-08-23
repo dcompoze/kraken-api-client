@@ -575,6 +575,45 @@ impl KrakenStream {
         Some(WsMessageEvent::ChannelData(value))
     }
 
+    /// Parse a trading response envelope into an event.
+    ///
+    /// The payload is read from the `result` field, or from the whole message
+    /// when `from_result_field` is false.
+    /// A successful response whose payload does not match the expected shape
+    /// is surfaced as raw channel data instead of being dropped, so callers
+    /// waiting on the `req_id` still receive the message.
+    fn parse_trading_response<T, F>(
+        method: &str,
+        value: &serde_json::Value,
+        req_id: Option<u64>,
+        from_result_field: bool,
+        wrap: F,
+    ) -> WsMessageEvent
+    where
+        T: serde::de::DeserializeOwned,
+        F: FnOnce(T) -> WsMessageEvent,
+    {
+        let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+        if !success {
+            let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+            return WsMessageEvent::Error {
+                method: method.to_string(),
+                error: error.to_string(),
+                req_id,
+            };
+        }
+
+        let payload = if from_result_field {
+            value.get("result")
+        } else {
+            Some(value)
+        };
+        match payload.map(T::deserialize) {
+            Some(Ok(result)) => wrap(result),
+            _ => WsMessageEvent::ChannelData(value.clone()),
+        }
+    }
+
     /// Handle a response message (method-based).
     fn handle_response_message(
         &mut self,
@@ -632,163 +671,77 @@ impl KrakenStream {
                 }
             }
             "add_order" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(order_result) = serde_json::from_value::<AddOrderResult>(result.clone()) {
-                            return Some(WsMessageEvent::OrderAdded {
-                                req_id,
-                                result: order_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: AddOrderResult| WsMessageEvent::OrderAdded { req_id, result },
+                ));
             }
             "cancel_order" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(cancel_result) = serde_json::from_value::<CancelOrderResult>(result.clone()) {
-                            return Some(WsMessageEvent::OrderCancelled {
-                                req_id,
-                                result: cancel_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: CancelOrderResult| WsMessageEvent::OrderCancelled { req_id, result },
+                ));
             }
             "cancel_all" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(cancel_result) = serde_json::from_value::<CancelAllResult>(result.clone()) {
-                            return Some(WsMessageEvent::AllOrdersCancelled {
-                                req_id,
-                                result: cancel_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: CancelAllResult| WsMessageEvent::AllOrdersCancelled { req_id, result },
+                ));
             }
             "edit_order" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(edit_result) = serde_json::from_value::<EditOrderResult>(result.clone()) {
-                            return Some(WsMessageEvent::OrderEdited {
-                                req_id,
-                                result: edit_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: EditOrderResult| WsMessageEvent::OrderEdited { req_id, result },
+                ));
             }
             "amend_order" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(amend_result) = serde_json::from_value::<AmendOrderResult>(result.clone()) {
-                            return Some(WsMessageEvent::OrderAmended {
-                                req_id,
-                                result: amend_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: AmendOrderResult| WsMessageEvent::OrderAmended { req_id, result },
+                ));
             }
             "batch_add" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(batch_result) = serde_json::from_value::<Vec<AddOrderResult>>(result.clone()) {
-                            return Some(WsMessageEvent::BatchOrdersAdded {
-                                req_id,
-                                result: batch_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: Vec<AddOrderResult>| WsMessageEvent::BatchOrdersAdded { req_id, result },
+                ));
             }
             "batch_cancel" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    // The cancel count is reported at the top level, not inside `result`.
-                    if let Ok(batch_result) = serde_json::from_value::<BatchCancelResult>(value.clone()) {
-                        return Some(WsMessageEvent::BatchOrdersCancelled {
-                            req_id,
-                            result: batch_result,
-                        });
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                // The cancel count is reported at the top level, not inside `result`.
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    false,
+                    |result: BatchCancelResult| WsMessageEvent::BatchOrdersCancelled { req_id, result },
+                ));
             }
             "cancel_all_orders_after" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                if success {
-                    if let Some(result) = value.get("result") {
-                        if let Ok(cod_result) = serde_json::from_value::<CancelAllOrdersAfterResult>(result.clone()) {
-                            return Some(WsMessageEvent::CancelOnDisconnectSet {
-                                req_id,
-                                result: cod_result,
-                            });
-                        }
-                    }
-                } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
-                    return Some(WsMessageEvent::Error {
-                        method: method.to_string(),
-                        error: error.to_string(),
-                        req_id,
-                    });
-                }
+                return Some(Self::parse_trading_response(
+                    method,
+                    value,
+                    req_id,
+                    true,
+                    |result: CancelAllOrdersAfterResult| WsMessageEvent::CancelOnDisconnectSet { req_id, result },
+                ));
             }
             _ => {
                 // Unknown method, return as raw data
