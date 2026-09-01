@@ -27,6 +27,8 @@ pub struct WsConfig {
     pub ping_interval: Duration,
     /// Pong timeout - disconnect if no pong received.
     pub pong_timeout: Duration,
+    /// Whether private connections may use plaintext WebSocket transport.
+    pub danger_allow_insecure_transport: bool,
 }
 
 impl Default for WsConfig {
@@ -37,6 +39,7 @@ impl Default for WsConfig {
             max_reconnect_attempts: None,
             ping_interval: Duration::from_secs(30),
             pong_timeout: Duration::from_secs(10),
+            danger_allow_insecure_transport: false,
         }
     }
 }
@@ -87,6 +90,14 @@ impl WsConfigBuilder {
         self
     }
 
+    /// Allow private connections over plaintext WebSocket transport.
+    ///
+    /// This option can expose API credentials. Use it only with a local test server.
+    pub fn danger_allow_insecure_transport(mut self) -> Self {
+        self.config.danger_allow_insecure_transport = true;
+        self
+    }
+
     /// Build the configuration.
     pub fn build(self) -> WsConfig {
         self.config
@@ -124,7 +135,10 @@ impl FuturesWsClient {
         }
     }
 
-    /// Create a client with a custom URL (useful for testing).
+    /// Create a client with a custom URL.
+    ///
+    /// Private connections require WSS unless the configuration uses the explicit
+    /// insecure transport option for a local test server.
     pub fn with_url(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),

@@ -12,7 +12,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::{interval, Interval};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_tls_with_config};
 
 use crate::error::KrakenError;
 use crate::spot::ws::client::WsConfig;
@@ -171,6 +171,11 @@ impl KrakenStream {
         config: WsConfig,
         token: String,
     ) -> Result<Self, KrakenError> {
+        crate::tls::require_secure_url(
+            url,
+            "wss",
+            config.danger_allow_insecure_transport,
+        )?;
         Self::connect(url, config, Some(token)).await
     }
 
@@ -180,9 +185,12 @@ impl KrakenStream {
         config: WsConfig,
         token: Option<String>,
     ) -> Result<Self, KrakenError> {
-        let (ws_stream, _) = connect_async(url).await.map_err(|e| {
-            KrakenError::WebSocketMsg(format!("Failed to connect to {}: {}", url, e))
-        })?;
+        let connector = crate::tls::websocket_connector_for_url(url)?;
+        let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector))
+            .await
+            .map_err(|e| {
+                KrakenError::WebSocketMsg(format!("Failed to connect to {}: {}", url, e))
+            })?;
 
         let (sink, receiver) = ws_stream.split();
         let ping_interval_duration = config.ping_interval;
@@ -401,9 +409,10 @@ impl KrakenStream {
         let backoff = self.backoff_duration();
         tokio::time::sleep(backoff).await;
 
-        let (ws_stream, _) = connect_async(&self.url).await.map_err(|e| {
-            KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e))
-        })?;
+        let connector = crate::tls::websocket_connector_for_url(&self.url)?;
+        let (ws_stream, _) = connect_async_tls_with_config(&self.url, None, false, Some(connector))
+            .await
+            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e)))?;
 
         let (sink, receiver) = ws_stream.split();
         self.sink = Some(Arc::new(Mutex::new(sink)));

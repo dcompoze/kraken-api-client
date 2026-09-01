@@ -12,7 +12,7 @@ use kraken_api_client::types::OhlcInterval;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Public endpoints need no credentials.
-    let client = SpotRestClient::new();
+    let client = SpotRestClient::new()?;
 
     println!("=== Server Time ===");
     let time = client.get_server_time().await?;

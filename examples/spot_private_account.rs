@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nonce_provider(Arc::new(IncreasingNonce::new()))
         .user_agent("kraken-api-client-examples/spot_private_account")
         .max_retries(2)
-        .build();
+        .build()?;
 
     println!("=== Account Balance ===");
     let balances = client.get_account_balance().await?;

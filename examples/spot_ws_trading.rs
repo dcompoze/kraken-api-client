@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let rest = SpotRestClient::builder().credentials(credentials).build();
+    let rest = SpotRestClient::builder().credentials(credentials).build()?;
     let token = rest.get_websocket_token().await?.token;
 
     let ws_client = SpotWsClient::new();

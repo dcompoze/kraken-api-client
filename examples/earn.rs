@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let client = SpotRestClient::builder().credentials(credentials).build();
+    let client = SpotRestClient::builder().credentials(credentials).build()?;
 
     let strategies = client
         .list_earn_strategies(Some(&EarnStrategiesRequest::default()))

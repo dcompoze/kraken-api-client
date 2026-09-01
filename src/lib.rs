@@ -17,12 +17,18 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = SpotRestClient::new();
+//!     let client = SpotRestClient::new()?;
 //!     let time = client.get_server_time().await?;
 //!     println!("Server time: {:?}", time);
 //!     Ok(())
 //! }
 //! ```
+
+#[cfg(all(feature = "native-tls", feature = "rustls-tls"))]
+compile_error!("features `native-tls` and `rustls-tls` cannot be enabled together");
+
+#[cfg(not(any(feature = "native-tls", feature = "rustls-tls")))]
+compile_error!("enable one TLS backend feature: `native-tls` or `rustls-tls`");
 
 pub mod auth;
 pub mod error;
@@ -31,6 +37,8 @@ pub mod spot;
 pub mod types;
 
 pub mod futures;
+
+mod tls;
 
 pub use error::KrakenError;
 pub use types::common::{BuySell, OrderStatus, OrderType};

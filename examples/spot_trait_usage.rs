@@ -12,7 +12,7 @@ async fn print_time<C: KrakenClient>(client: &C) -> Result<(), kraken_api_client
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = SpotRestClient::new();
+    let client = SpotRestClient::new()?;
     print_time(&client).await?;
     Ok(())
 }

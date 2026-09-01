@@ -6,7 +6,7 @@ use kraken_api_client::futures::rest::FuturesRestClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = FuturesRestClient::new();
+    let client = FuturesRestClient::new()?;
 
     println!("=== Futures Tickers (first 5) ===");
     let tickers = client.get_tickers().await?;

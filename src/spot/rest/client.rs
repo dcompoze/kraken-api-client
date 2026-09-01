@@ -53,7 +53,7 @@ impl SpotRestClient {
     /// Create a new client without credentials.
     ///
     /// Such a client can only access public endpoints.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, KrakenError> {
         Self::builder().build()
     }
 
@@ -299,12 +299,6 @@ impl SpotRestClient {
     }
 }
 
-impl Default for SpotRestClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl std::fmt::Debug for SpotRestClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpotRestClient")
@@ -321,6 +315,7 @@ pub struct SpotRestClientBuilder {
     nonce_provider: Option<Arc<dyn NonceProvider>>,
     user_agent: Option<String>,
     max_retries: u32,
+    allow_insecure_transport: bool,
 }
 
 impl SpotRestClientBuilder {
@@ -332,10 +327,14 @@ impl SpotRestClientBuilder {
             nonce_provider: None,
             user_agent: None,
             max_retries: 3,
+            allow_insecure_transport: false,
         }
     }
 
-    /// Set the base URL (useful for testing with a mock server).
+    /// Set the base URL.
+    ///
+    /// Authenticated clients require HTTPS unless
+    /// [`Self::danger_allow_insecure_transport`] is set for a local test server.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
@@ -365,8 +364,25 @@ impl SpotRestClientBuilder {
         self
     }
 
+    /// Allow authenticated requests over plaintext HTTP.
+    ///
+    /// This option can expose API credentials. Use it only with a local test server.
+    pub fn danger_allow_insecure_transport(mut self) -> Self {
+        self.allow_insecure_transport = true;
+        self
+    }
+
     /// Build the client.
-    pub fn build(self) -> SpotRestClient {
+    pub fn build(self) -> Result<SpotRestClient, KrakenError> {
+        url::Url::parse(&self.base_url)?;
+        if self.credentials.is_some() {
+            crate::tls::require_secure_url(
+                &self.base_url,
+                "https",
+                self.allow_insecure_transport,
+            )?;
+        }
+
         let mut headers = HeaderMap::new();
         let user_agent = self
             .user_agent
@@ -375,10 +391,16 @@ impl SpotRestClientBuilder {
             .unwrap_or_else(|_| HeaderValue::from_static("kraken-api-client"));
         headers.insert(USER_AGENT, header_value);
 
-        let reqwest_client = reqwest::Client::builder()
+        let reqwest_builder = reqwest::Client::builder()
             .default_headers(headers)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .redirect(reqwest::redirect::Policy::none());
+
+        #[cfg(feature = "rustls-tls")]
+        let reqwest_builder = reqwest_builder.tls_backend_rustls();
+        #[cfg(feature = "native-tls")]
+        let reqwest_builder = reqwest_builder.tls_backend_native();
+
+        let reqwest_client = reqwest_builder.build()?;
 
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(self.max_retries);
 
@@ -391,12 +413,12 @@ impl SpotRestClientBuilder {
             .nonce_provider
             .unwrap_or_else(|| Arc::new(IncreasingNonce::new()));
 
-        SpotRestClient {
+        Ok(SpotRestClient {
             http_client: client,
             base_url: self.base_url,
             credentials: self.credentials,
             nonce_provider,
-        }
+        })
     }
 }
 

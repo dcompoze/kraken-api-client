@@ -29,6 +29,19 @@ pub enum KrakenError {
     #[error("URL parsing error: {0}")]
     Url(#[from] url::ParseError),
 
+    /// TLS configuration failed
+    #[error("TLS configuration failed: {0}")]
+    TlsConfiguration(String),
+
+    /// An authenticated operation tried to use a plaintext transport
+    #[error("authenticated operations require {required_scheme} transport, got {actual_scheme}")]
+    InsecureTransport {
+        /// Required secure URL scheme
+        required_scheme: &'static str,
+        /// Rejected URL scheme
+        actual_scheme: String,
+    },
+
     /// Kraken API returned an error
     #[error("Kraken API error: {0}")]
     Api(ApiError),

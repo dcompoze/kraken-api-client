@@ -9,21 +9,38 @@ name = "kraken-api-client"
 readme = "README.md"
 repository = "https://github.com/dcompoze/kraken-api-client"
 rust-version = "1.85"
-version = "1.2.0"
+version = "1.2.1"
 
 [lib]
 name = "kraken_api_client"
 path = "src/lib.rs"
+
+[features]
+default = ["rustls-tls"]
+native-tls = [
+    "dep:native-tls",
+    "reqwest/native-tls",
+    "tokio-tungstenite/native-tls",
+]
+rustls-tls = [
+    "dep:rustls",
+    "dep:rustls-native-certs",
+    "reqwest/rustls",
+    "tokio-tungstenite/rustls-tls-native-roots",
+]
 
 [dependencies]
 base64 = "0.22"
 crc32fast = "1.5.1"
 futures-util = "0.3"
 hmac = "0.12"
-reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
+native-tls = { version = "0.2", optional = true }
+reqwest = { version = "0.13", features = ["json"], default-features = false }
 reqwest-middleware = "0.5"
 reqwest-retry = "0.9"
 reqwest-tracing = "0.7"
+rustls = { version = "0.23", features = ["aws_lc_rs", "std", "tls12"], default-features = false, optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 rust_decimal = { version = "1.39", features = ["serde-with-str"] }
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,7 +52,7 @@ thiserror = "2.0"
 time = { version = "0.3", features = ["serde", "macros"] }
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["connect"], default-features = false }
 tracing = "0.1"
 url = "2.5"
 

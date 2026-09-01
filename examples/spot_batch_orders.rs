@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
     let credentials = Arc::new(EnvCredentials::from_env());
-    let client = SpotRestClient::builder().credentials(credentials).build();
+    let client = SpotRestClient::builder().credentials(credentials).build()?;
 
     // Place two orders in one batch, validate only.
     let orders = vec![

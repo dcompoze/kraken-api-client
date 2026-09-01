@@ -12,7 +12,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::{Interval, interval};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_tls_with_config};
 
 use crate::auth::CredentialsProvider;
 use crate::error::KrakenError;
@@ -125,6 +125,11 @@ impl FuturesStream {
         config: WsConfig,
         credentials: Arc<dyn CredentialsProvider>,
     ) -> Result<Self, KrakenError> {
+        crate::tls::require_secure_url(
+            url,
+            "wss",
+            config.danger_allow_insecure_transport,
+        )?;
         let mut stream = Self::connect(url, config, Some(credentials)).await?;
         stream.authenticate().await?;
         Ok(stream)
@@ -136,9 +141,12 @@ impl FuturesStream {
         config: WsConfig,
         credentials: Option<Arc<dyn CredentialsProvider>>,
     ) -> Result<Self, KrakenError> {
-        let (ws_stream, _) = connect_async(url).await.map_err(|e| {
-            KrakenError::WebSocketMsg(format!("Failed to connect to {}: {}", url, e))
-        })?;
+        let connector = crate::tls::websocket_connector_for_url(url)?;
+        let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector))
+            .await
+            .map_err(|e| {
+                KrakenError::WebSocketMsg(format!("Failed to connect to {}: {}", url, e))
+            })?;
 
         let (sink, receiver) = ws_stream.split();
         let ping_interval_duration = config.ping_interval;
@@ -378,7 +386,9 @@ impl FuturesStream {
         let backoff = self.backoff_duration();
         tokio::time::sleep(backoff).await;
 
-        let (ws_stream, _) = connect_async(&self.url)
+        let connector = crate::tls::websocket_connector_for_url(&self.url)?;
+        let (ws_stream, _) =
+            connect_async_tls_with_config(&self.url, None, false, Some(connector))
             .await
             .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e)))?;
 

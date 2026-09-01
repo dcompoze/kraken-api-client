@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let client = SpotRestClient::builder().credentials(credentials).build();
+    let client = SpotRestClient::builder().credentials(credentials).build()?;
 
     // Validate-only order (won't be submitted).
     let add_request = kraken_api_client::spot::rest::private::AddOrderRequest::new(

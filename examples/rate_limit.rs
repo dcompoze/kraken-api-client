@@ -11,7 +11,7 @@ use kraken_api_client::rate_limit::{
 use kraken_api_client::spot::rest::SpotRestClient;
 use kraken_api_client::types::VerificationTier;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TTL cache for tracking items with expiration.
     let mut cache: TtlCache<String, i64> = TtlCache::new(Duration::from_secs(5));
     let order_key = "order-1".to_string();
@@ -49,7 +49,7 @@ fn main() {
     println!("ETHUSD capacity: {}", limiter.available_capacity());
 
     // Rate-limited wrapper around a REST client.
-    let inner = SpotRestClient::new();
+    let inner = SpotRestClient::new()?;
     let config = RateLimitConfig {
         tier: VerificationTier::Intermediate,
         enabled: true,
@@ -57,4 +57,5 @@ fn main() {
     let mut wrapped = RateLimitedClient::new(inner, config);
     wrapped.set_enabled(true);
     println!("Rate limiting enabled: {}", wrapped.config().enabled);
+    Ok(())
 }

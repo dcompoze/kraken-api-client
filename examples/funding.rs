@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let client = SpotRestClient::builder().credentials(credentials).build();
+    let client = SpotRestClient::builder().credentials(credentials).build()?;
 
     let methods = client
         .get_deposit_methods(&DepositMethodsRequest::new("XBT"))

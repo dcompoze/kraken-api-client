@@ -18,7 +18,7 @@ use kraken_api_client::spot::rest::SpotRestClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = SpotRestClient::new();
+    let client = SpotRestClient::new()?;
     let time = client.get_server_time().await?;
     println!("Server time: {:?}", time);
     Ok(())
@@ -36,7 +36,7 @@ use kraken_api_client::spot::rest::SpotRestClient;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let creds = Arc::new(EnvCredentials::from_env());
-    let client = SpotRestClient::builder().credentials(creds).build();
+    let client = SpotRestClient::builder().credentials(creds).build()?;
 
     let balances = client.get_account_balance().await?;
     println!("Balances: {:?}", balances);
@@ -51,7 +51,7 @@ use kraken_api_client::futures::rest::FuturesRestClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = FuturesRestClient::new();
+    let client = FuturesRestClient::new()?;
     let instruments = client.get_instruments().await?;
     println!("Instruments: {}", instruments.instruments.len());
     Ok(())
@@ -95,6 +95,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Futures REST (sub-accounts) | ✓ | list sub-accounts with holding, futures, and flex account balances |
 | Futures REST (market history) | ✓ | historical order, execution, and trigger events, account log CSV export |
 | Futures WebSocket | ✓ | Public and private feed subscriptions with challenge authentication |
+
+## TLS backends
+
+Rustls is the default backend for HTTPS and WSS connections.
+
+To use the platform-native TLS backend, disable default features and enable `native-tls`.
+
+```toml
+[dependencies]
+kraken-api-client = { version = "1.2", default-features = false, features = ["native-tls"] }
+```
 
 ## Credentials
 

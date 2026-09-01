@@ -12,7 +12,10 @@ use kraken_api_client::futures::rest::FuturesRestClient;
 use kraken_api_client::futures::sign_futures_request;
 
 fn build_public_client(server: &MockServer) -> FuturesRestClient {
-    FuturesRestClient::builder().base_url(server.uri()).build()
+    FuturesRestClient::builder()
+        .base_url(server.uri())
+        .build()
+        .unwrap()
 }
 
 struct FixedNonce(u64);
@@ -104,7 +107,9 @@ async fn test_private_get_accounts_signs_request() {
         .base_url(server.uri())
         .credentials(credentials)
         .nonce_provider(Arc::new(FixedNonce(nonce)))
-        .build();
+        .danger_allow_insecure_transport()
+        .build()
+        .unwrap();
 
     let accounts = client.get_accounts().await.unwrap();
     assert_eq!(accounts.result, "success");
@@ -215,7 +220,9 @@ async fn test_get_account_log_signs_request() {
         .base_url(server.uri())
         .credentials(credentials)
         .nonce_provider(Arc::new(FixedNonce(nonce)))
-        .build();
+        .danger_allow_insecure_transport()
+        .build()
+        .unwrap();
 
     let request = AccountLogRequest {
         count: Some(2),
@@ -259,7 +266,9 @@ async fn test_set_leverage_preference_signs_put_request() {
         .base_url(server.uri())
         .credentials(credentials)
         .nonce_provider(Arc::new(FixedNonce(nonce)))
-        .build();
+        .danger_allow_insecure_transport()
+        .build()
+        .unwrap();
 
     let result = client
         .set_leverage_preference("PF_XBTUSD", Some(rust_decimal::Decimal::from(10)))

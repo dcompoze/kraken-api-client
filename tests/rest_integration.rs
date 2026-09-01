@@ -19,7 +19,9 @@ fn build_client(server: &MockServer) -> SpotRestClient {
     SpotRestClient::builder()
         .base_url(server.uri())
         .credentials(credentials)
+        .danger_allow_insecure_transport()
         .build()
+        .unwrap()
 }
 
 #[tokio::test]

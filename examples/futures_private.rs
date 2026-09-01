@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if env::var("KRAKEN_FUTURES_DEMO").is_ok() {
         builder = builder.use_demo();
     }
-    let client = builder.build();
+    let client = builder.build()?;
 
     println!("=== Accounts ===");
     let accounts = client.get_accounts().await?;

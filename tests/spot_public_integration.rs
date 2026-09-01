@@ -7,7 +7,10 @@ use kraken_api_client::spot::rest::SpotRestClient;
 use kraken_api_client::types::OhlcInterval;
 
 fn build_public_client(server: &MockServer) -> SpotRestClient {
-    SpotRestClient::builder().base_url(server.uri()).build()
+    SpotRestClient::builder()
+        .base_url(server.uri())
+        .build()
+        .unwrap()
 }
 
 #[tokio::test]

@@ -22,7 +22,7 @@ async fn live_spot_private_smoke() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = SpotRestClient::builder()
         .credentials(Arc::new(credentials))
-        .build();
+        .build()?;
 
     let _balances = client.get_account_balance().await?;
     let token = client.get_websocket_token().await?;
@@ -45,7 +45,7 @@ async fn live_futures_private_smoke() -> Result<(), Box<dyn std::error::Error>> 
     };
     let client = FuturesRestClient::builder()
         .credentials(Arc::new(credentials))
-        .build();
+        .build()?;
 
     let accounts = client.get_accounts().await?;
     assert_eq!(accounts.result, "success");
