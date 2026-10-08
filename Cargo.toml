@@ -9,7 +9,7 @@ name = "kraken-api-client"
 readme = "README.md"
 repository = "https://github.com/dcompoze/kraken-api-client"
 rust-version = "1.85"
-version = "1.2.1"
+version = "1.2.2"
 
 [lib]
 name = "kraken_api_client"
@@ -17,11 +17,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["rustls-tls"]
-native-tls = [
-    "dep:native-tls",
-    "reqwest/native-tls",
-    "tokio-tungstenite/native-tls",
-]
+native-tls = ["dep:native-tls", "reqwest/native-tls", "tokio-tungstenite/native-tls"]
 rustls-tls = [
     "dep:rustls",
     "dep:rustls-native-certs",
@@ -39,9 +35,13 @@ reqwest = { version = "0.13", features = ["json"], default-features = false }
 reqwest-middleware = "0.5"
 reqwest-retry = "0.9"
 reqwest-tracing = "0.7"
-rustls = { version = "0.23", features = ["aws_lc_rs", "std", "tls12"], default-features = false, optional = true }
-rustls-native-certs = { version = "0.8", optional = true }
 rust_decimal = { version = "1.39", features = ["serde-with-str"] }
+rustls = { version = "0.23", features = [
+    "aws_lc_rs",
+    "std",
+    "tls12",
+], default-features = false, optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }

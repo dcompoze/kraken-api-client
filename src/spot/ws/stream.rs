@@ -1,6 +1,7 @@
 //! WebSocket stream implementation.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -10,23 +11,25 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::time::{interval, Interval};
+use tokio::task::JoinHandle;
+use tokio::time::{Interval, Sleep, interval, sleep, timeout};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_tls_with_config};
 
 use crate::error::KrakenError;
 use crate::spot::ws::client::WsConfig;
 use crate::spot::ws::messages::{
-    channels, AddOrderParams, AddOrderResult, AmendOrderParams, AmendOrderResult, BatchAddParams,
+    AddOrderParams, AddOrderResult, AmendOrderParams, AmendOrderResult, BatchAddParams,
     BatchCancelParams, BatchCancelResult, CancelAllOrdersAfterParams, CancelAllOrdersAfterResult,
     CancelAllParams, CancelAllResult, CancelOrderParams, CancelOrderResult, EditOrderParams,
-    EditOrderResult, Heartbeat, PingRequest, PongResponse, SubscribeParams, SubscriptionResult,
-    SystemStatusMessage, WsRequest,
+    EditOrderResult, Heartbeat, PongResponse, SubscribeParams, SubscriptionResult,
+    SystemStatusMessage, WsRequest, channels,
 };
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = SplitSink<WsStream, WsMessage>;
 type WsReceiver = SplitStream<WsStream>;
+type StreamFuture<T> = Pin<Box<dyn Future<Output = Result<T, KrakenError>> + Send + Sync>>;
 
 /// A message received from the WebSocket connection.
 #[derive(Debug, Clone)]
@@ -100,7 +103,11 @@ pub enum WsMessageEvent {
         result: CancelAllOrdersAfterResult,
     },
     /// Subscription/unsubscription error.
-    Error { method: String, error: String, req_id: Option<u64> },
+    Error {
+        method: String,
+        error: String,
+        req_id: Option<u64>,
+    },
     /// Connection closed.
     Disconnected,
     /// Reconnecting.
@@ -138,14 +145,17 @@ pub struct KrakenStream {
     token: Option<String>,
     subscriptions: HashMap<String, SubscriptionState>,
     ping_interval: Interval,
-    /// Last ping sent timestamp
-    last_ping: Option<Instant>,
+    /// Request ID of the outstanding ping.
+    pending_ping_id: Option<u64>,
     /// Last message received timestamp
     last_message: Instant,
     reconnect_attempt: u32,
     req_id: u64,
     connected: bool,
-    reconnecting: bool,
+    reconnect_future: Option<StreamFuture<Self>>,
+    ping_task: Option<JoinHandle<Result<(), KrakenError>>>,
+    pong_deadline: Option<Pin<Box<Sleep>>>,
+    closed: bool,
 }
 
 impl std::fmt::Debug for KrakenStream {
@@ -153,7 +163,7 @@ impl std::fmt::Debug for KrakenStream {
         f.debug_struct("KrakenStream")
             .field("url", &self.url)
             .field("connected", &self.connected)
-            .field("reconnecting", &self.reconnecting)
+            .field("reconnecting", &self.reconnect_future.is_some())
             .field("subscriptions", &self.subscriptions.len())
             .finish()
     }
@@ -171,11 +181,7 @@ impl KrakenStream {
         config: WsConfig,
         token: String,
     ) -> Result<Self, KrakenError> {
-        crate::tls::require_secure_url(
-            url,
-            "wss",
-            config.danger_allow_insecure_transport,
-        )?;
+        crate::tls::require_secure_url(url, "wss", config.danger_allow_insecure_transport)?;
         Self::connect(url, config, Some(token)).await
     }
 
@@ -203,17 +209,21 @@ impl KrakenStream {
             token,
             subscriptions: HashMap::new(),
             ping_interval: interval(ping_interval_duration),
-            last_ping: None,
+            pending_ping_id: None,
             last_message: Instant::now(),
             reconnect_attempt: 0,
             req_id: 0,
             connected: true,
-            reconnecting: false,
+            reconnect_future: None,
+            ping_task: None,
+            pong_deadline: None,
+            closed: false,
         })
     }
 
     /// Subscribe to a channel.
     pub async fn subscribe(&mut self, params: SubscribeParams) -> Result<(), KrakenError> {
+        self.ensure_connected()?;
         let key = subscription_key(&params);
 
         self.subscriptions.insert(
@@ -230,6 +240,7 @@ impl KrakenStream {
 
     /// Unsubscribe from a channel.
     pub async fn unsubscribe(&mut self, params: SubscribeParams) -> Result<(), KrakenError> {
+        self.ensure_connected()?;
         let key = subscription_key(&params);
         self.subscriptions.remove(&key);
 
@@ -250,8 +261,11 @@ impl KrakenStream {
 
     /// Send a ping message.
     pub async fn ping(&mut self) -> Result<(), KrakenError> {
-        let req = WsRequest::new("ping", PingRequest::with_req_id(self.next_req_id()));
-        self.last_ping = Some(Instant::now());
+        self.ensure_connected()?;
+        let req_id = self.next_req_id();
+        let req = serde_json::json!({"method": "ping", "req_id": req_id});
+        self.pending_ping_id = Some(req_id);
+        self.pong_deadline = Some(Box::pin(sleep(self.config.pong_timeout)));
         self.send_json(&req).await
     }
 
@@ -356,20 +370,26 @@ impl KrakenStream {
         Ok(())
     }
 
+    fn ensure_connected(&self) -> Result<(), KrakenError> {
+        if !self.connected {
+            return Err(KrakenError::WebSocketMsg("Not connected".into()));
+        }
+        Ok(())
+    }
+
     /// Send a JSON message.
-    async fn send_json<T: serde::Serialize>(&self, msg: &T) -> Result<(), KrakenError> {
-        let sink = self
-            .sink
-            .as_ref()
-            .ok_or_else(|| KrakenError::WebSocketMsg("Not connected".into()))?;
-
-        let json = serde_json::to_string(msg)
-            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to serialize message: {}", e)))?;
-
-        let mut sink = sink.lock().await;
-        sink.send(WsMessage::Text(json.into()))
-            .await
-            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to send message: {}", e)))
+    fn send_json<T: serde::Serialize>(
+        &self,
+        msg: &T,
+    ) -> impl Future<Output = Result<(), KrakenError>> + Send + Sync + use<T> {
+        let sink = self.sink.clone();
+        let json = serde_json::to_string(msg);
+        async move {
+            let sink = sink.ok_or_else(|| KrakenError::WebSocketMsg("Not connected".into()))?;
+            let json = json.map_err(KrakenError::Json)?;
+            sink.lock().await.send(WsMessage::Text(json.into())).await?;
+            Ok(())
+        }
     }
 
     /// Get the next request ID.
@@ -387,7 +407,6 @@ impl KrakenStream {
     }
 
     /// Calculate backoff duration for reconnection.
-    #[allow(dead_code)]
     fn backoff_duration(&self) -> Duration {
         let base = self.config.initial_backoff.as_millis() as u64;
         let max = self.config.max_backoff.as_millis() as u64;
@@ -396,41 +415,47 @@ impl KrakenStream {
         Duration::from_millis(backoff_ms)
     }
 
-    /// Attempt to reconnect.
-    #[allow(dead_code)]
-    async fn reconnect(&mut self) -> Result<(), KrakenError> {
-        self.reconnect_attempt += 1;
-        self.connected = false;
-        self.reconnecting = true;
+    /// Schedule a reconnect, including subscription restoration.
+    fn reconnect(&mut self) {
+        let backoff = self.backoff_duration();
+        self.reconnect_attempt = self.reconnect_attempt.saturating_add(1);
+        let url = self.url.clone();
+        let config = self.config.clone();
+        let subscriptions = self.subscriptions.clone();
+        let token = self.token.clone();
+        let req_id = self.req_id;
+        self.reconnect_future = Some(Box::pin(async move {
+            sleep(backoff).await;
+            timeout(Duration::from_secs(10), async move {
+                let mut stream = Self::connect(&url, config, token).await?;
+                stream.req_id = req_id;
+                stream.subscriptions = subscriptions;
+                stream.restore_subscriptions().await?;
+                Ok(stream)
+            })
+            .await
+            .map_err(|_| KrakenError::WebSocketMsg("Reconnect timed out".into()))?
+        }));
+    }
 
+    fn disconnect(&mut self) {
+        self.connected = false;
         self.sink = None;
         self.receiver = None;
-
-        let backoff = self.backoff_duration();
-        tokio::time::sleep(backoff).await;
-
-        let connector = crate::tls::websocket_connector_for_url(&self.url)?;
-        let (ws_stream, _) = connect_async_tls_with_config(&self.url, None, false, Some(connector))
-            .await
-            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e)))?;
-
-        let (sink, receiver) = ws_stream.split();
-        self.sink = Some(Arc::new(Mutex::new(sink)));
-        self.receiver = Some(receiver);
-        self.connected = true;
-        self.reconnecting = false;
-        self.reconnect_attempt = 0;
-        self.last_message = Instant::now();
-
-        self.restore_subscriptions().await?;
-
-        Ok(())
+        if let Some(task) = self.ping_task.take() {
+            task.abort();
+        }
+        self.pong_deadline = None;
+        self.pending_ping_id = None;
     }
 
     /// Restore subscriptions after reconnection.
-    #[allow(dead_code)]
     async fn restore_subscriptions(&mut self) -> Result<(), KrakenError> {
-        let subs: Vec<_> = self.subscriptions.values().map(|s| s.params.clone()).collect();
+        let subs: Vec<_> = self
+            .subscriptions
+            .values()
+            .map(|s| s.params.clone())
+            .collect();
 
         for params in subs {
             self.send_subscribe(params).await?;
@@ -482,9 +507,15 @@ impl KrakenStream {
         T: serde::de::DeserializeOwned,
         F: FnOnce(T) -> WsMessageEvent,
     {
-        let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+        let success = value
+            .get("success")
+            .and_then(|s| s.as_bool())
+            .unwrap_or(false);
         if !success {
-            let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+            let error = value
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
             return WsMessageEvent::Error {
                 method: method.to_string(),
                 error: error.to_string(),
@@ -514,15 +545,25 @@ impl KrakenStream {
         match method {
             "pong" => {
                 if let Ok(pong) = serde_json::from_value::<PongResponse>(value.clone()) {
-                    self.last_ping = None;
+                    if pong.req_id == self.pending_ping_id
+                        && value.get("success") != Some(&serde_json::Value::Bool(false))
+                    {
+                        self.pending_ping_id = None;
+                        self.pong_deadline = None;
+                    }
                     return Some(WsMessageEvent::Pong(pong));
                 }
             }
             "subscribe" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                let success = value
+                    .get("success")
+                    .and_then(|s| s.as_bool())
+                    .unwrap_or(false);
                 if success {
                     if let Some(result) = value.get("result") {
-                        if let Ok(sub_result) = serde_json::from_value::<SubscriptionResult>(result.clone()) {
+                        if let Ok(sub_result) =
+                            serde_json::from_value::<SubscriptionResult>(result.clone())
+                        {
                             let key = subscription_key_from_result(&sub_result);
                             if let Some(state) = self.subscriptions.get_mut(&key) {
                                 state.status = SubscriptionStatus::Active;
@@ -532,7 +573,10 @@ impl KrakenStream {
                         }
                     }
                 } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    let error = value
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("Unknown error");
                     return Some(WsMessageEvent::Error {
                         method: method.to_string(),
                         error: error.to_string(),
@@ -541,15 +585,23 @@ impl KrakenStream {
                 }
             }
             "unsubscribe" => {
-                let success = value.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                let success = value
+                    .get("success")
+                    .and_then(|s| s.as_bool())
+                    .unwrap_or(false);
                 if success {
                     if let Some(result) = value.get("result") {
-                        if let Ok(sub_result) = serde_json::from_value::<SubscriptionResult>(result.clone()) {
+                        if let Ok(sub_result) =
+                            serde_json::from_value::<SubscriptionResult>(result.clone())
+                        {
                             return Some(WsMessageEvent::Unsubscribed(sub_result));
                         }
                     }
                 } else {
-                    let error = value.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+                    let error = value
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("Unknown error");
                     return Some(WsMessageEvent::Error {
                         method: method.to_string(),
                         error: error.to_string(),
@@ -608,7 +660,10 @@ impl KrakenStream {
                     value,
                     req_id,
                     true,
-                    |result: Vec<AddOrderResult>| WsMessageEvent::BatchOrdersAdded { req_id, result },
+                    |result: Vec<AddOrderResult>| WsMessageEvent::BatchOrdersAdded {
+                        req_id,
+                        result,
+                    },
                 ));
             }
             "batch_cancel" => {
@@ -618,7 +673,10 @@ impl KrakenStream {
                     value,
                     req_id,
                     false,
-                    |result: BatchCancelResult| WsMessageEvent::BatchOrdersCancelled { req_id, result },
+                    |result: BatchCancelResult| WsMessageEvent::BatchOrdersCancelled {
+                        req_id,
+                        result,
+                    },
                 ));
             }
             "cancel_all_orders_after" => {
@@ -627,7 +685,10 @@ impl KrakenStream {
                     value,
                     req_id,
                     true,
-                    |result: CancelAllOrdersAfterResult| WsMessageEvent::CancelOnDisconnectSet { req_id, result },
+                    |result: CancelAllOrdersAfterResult| WsMessageEvent::CancelOnDisconnectSet {
+                        req_id,
+                        result,
+                    },
                 ));
             }
             _ => {
@@ -663,25 +724,18 @@ impl KrakenStream {
         None
     }
 
-    /// Check connection health (ping timeout).
-    fn check_connection_health(&self) -> bool {
-        if let Some(ping_time) = self.last_ping {
-            if ping_time.elapsed() > self.config.pong_timeout {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Close the connection gracefully.
+    /// Close the connection without reconnecting.
     pub async fn close(&mut self) -> Result<(), KrakenError> {
-        if let Some(sink) = self.sink.take() {
-            let mut sink = sink.lock().await;
-            let _ = sink.send(WsMessage::Close(None)).await;
+        self.closed = true;
+        self.reconnect_future = None;
+        let sink = self.sink.clone();
+        self.disconnect();
+        if let Some(sink) = sink {
+            let _ = timeout(self.config.pong_timeout, async move {
+                sink.lock().await.send(WsMessage::Close(None)).await
+            })
+            .await;
         }
-        self.receiver = None;
-        self.connected = false;
         Ok(())
     }
 
@@ -691,117 +745,113 @@ impl KrakenStream {
     }
 }
 
+impl Drop for KrakenStream {
+    fn drop(&mut self) {
+        if let Some(task) = &self.ping_task {
+            task.abort();
+        }
+    }
+}
+
 impl Stream for KrakenStream {
     type Item = Result<WsMessageEvent, KrakenError>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.ping_interval.poll_tick(cx).is_ready() && self.connected {
-            // Do not send a new ping while a pong is still outstanding.
-            if self.last_ping.is_none() {
-                let this = self.as_mut().get_mut();
-                let ping_req = WsRequest::new("ping", PingRequest::with_req_id(this.next_req_id()));
-                this.last_ping = Some(Instant::now());
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.closed {
+            return Poll::Ready(None);
+        }
 
-                if let Some(sink) = &this.sink {
-                    let sink = sink.clone();
-                    if let Ok(json) = serde_json::to_string(&ping_req) {
-                        tokio::spawn(async move {
-                            let mut sink = sink.lock().await;
-                            let _ = sink.send(WsMessage::Text(json.into())).await;
-                        });
-                    }
+        if let Some(reconnect) = &mut this.reconnect_future {
+            match reconnect.as_mut().poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(stream)) => {
+                    *this = stream;
+                    return Poll::Ready(Some(Ok(WsMessageEvent::Reconnected)));
+                }
+                Poll::Ready(Err(error)) => {
+                    tracing::warn!(%error, attempt = this.reconnect_attempt, "WebSocket reconnect failed");
+                    this.reconnect_future = None;
                 }
             }
         }
 
-        if !self.check_connection_health() && self.connected {
-            let this = self.as_mut().get_mut();
-            this.connected = false;
-
+        if !this.connected {
             if this.should_reconnect() {
+                this.reconnect();
                 return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
-                    attempt: this.reconnect_attempt + 1,
+                    attempt: this.reconnect_attempt,
                 })));
-            } else {
-                return Poll::Ready(Some(Ok(WsMessageEvent::Disconnected)));
             }
+            this.closed = true;
+            return Poll::Ready(Some(Ok(WsMessageEvent::Disconnected)));
         }
 
-        if let Some(receiver) = self.receiver.as_mut() {
-            match Pin::new(receiver).poll_next(cx) {
-                Poll::Ready(Some(Ok(msg))) => {
-                    let this = self.as_mut().get_mut();
-                    match msg {
-                        WsMessage::Text(text) => {
-                            if let Some(event) = this.parse_message(&text) {
-                                return Poll::Ready(Some(Ok(event)));
-                            }
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Binary(data) => {
-                            if let Ok(text) = String::from_utf8(data.to_vec()) {
-                                if let Some(event) = this.parse_message(&text) {
-                                    return Poll::Ready(Some(Ok(event)));
-                                }
-                            }
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Ping(_) | WsMessage::Pong(_) => {
-                            // Protocol-level ping/pong is handled by tungstenite.
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Close(_) => {
-                            this.connected = false;
-                            if this.should_reconnect() {
-                                return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
-                                    attempt: this.reconnect_attempt + 1,
-                                })));
-                            } else {
-                                return Poll::Ready(Some(Ok(WsMessageEvent::Disconnected)));
-                            }
-                        }
-                        WsMessage::Frame(_) => {
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                    }
-                }
-                Poll::Ready(Some(Err(e))) => {
-                    let this = self.as_mut().get_mut();
-                    this.connected = false;
-                    tracing::warn!("WebSocket error: {}", e);
+        if this.pong_deadline.is_none()
+            && this.ping_task.is_none()
+            && this.ping_interval.poll_tick(cx).is_ready()
+        {
+            let req_id = this.next_req_id();
+            let req = serde_json::json!({"method": "ping", "req_id": req_id});
+            this.pending_ping_id = Some(req_id);
+            this.ping_task = Some(tokio::spawn(this.send_json(&req)));
+            this.pong_deadline = Some(Box::pin(sleep(this.config.pong_timeout)));
+        }
 
-                    if this.should_reconnect() {
-                        return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
-                            attempt: this.reconnect_attempt + 1,
-                        })));
-                    } else {
-                        return Poll::Ready(Some(Err(KrakenError::WebSocket(e))));
-                    }
-                }
-                Poll::Ready(None) => {
-                    let this = self.as_mut().get_mut();
-                    this.connected = false;
-
-                    if this.should_reconnect() {
-                        return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
-                            attempt: this.reconnect_attempt + 1,
-                        })));
-                    } else {
-                        return Poll::Ready(None);
-                    }
+        if let Some(ping) = &mut this.ping_task {
+            match Pin::new(ping).poll(cx) {
+                Poll::Ready(Ok(Ok(()))) => this.ping_task = None,
+                Poll::Ready(result) => {
+                    tracing::warn!(?result, "WebSocket ping failed");
+                    this.disconnect();
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
                 }
                 Poll::Pending => {}
             }
-        } else if !self.reconnecting && self.should_reconnect() {
-            return Poll::Ready(Some(Ok(WsMessageEvent::Reconnecting {
-                attempt: self.reconnect_attempt + 1,
-            })));
         }
 
+        if let Some(deadline) = &mut this.pong_deadline {
+            if deadline.as_mut().poll(cx).is_ready() {
+                tracing::warn!("WebSocket pong timed out");
+                this.disconnect();
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+        }
+
+        let Some(receiver) = &mut this.receiver else {
+            return Poll::Pending;
+        };
+        match Pin::new(receiver).poll_next(cx) {
+            Poll::Ready(Some(Ok(message))) => match message {
+                WsMessage::Text(text) => {
+                    if let Some(event) = this.parse_message(&text) {
+                        return Poll::Ready(Some(Ok(event)));
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    if let Ok(text) = String::from_utf8(data.to_vec()) {
+                        if let Some(event) = this.parse_message(&text) {
+                            return Poll::Ready(Some(Ok(event)));
+                        }
+                    }
+                }
+                WsMessage::Close(_) => this.disconnect(),
+                _ => {}
+            },
+            Poll::Ready(Some(Err(error))) => {
+                tracing::warn!(%error, "WebSocket receive failed");
+                this.disconnect();
+                if !this.should_reconnect() {
+                    this.closed = true;
+                    return Poll::Ready(Some(Err(KrakenError::WebSocket(error))));
+                }
+            }
+            Poll::Ready(None) => this.disconnect(),
+            Poll::Pending => return Poll::Pending,
+        }
+        cx.waker().wake_by_ref();
         Poll::Pending
     }
 }
@@ -828,6 +878,39 @@ fn subscription_key_from_result(result: &SubscriptionResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_next_does_not_block_subscriptions() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (release, hold) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            hold.await.unwrap();
+        });
+        let mut stream = KrakenStream::connect_public(&url, WsConfig::default())
+            .await
+            .unwrap();
+        let sink = stream.sink.as_ref().unwrap().clone();
+        let guard = sink.lock().await;
+        assert!(
+            timeout(Duration::from_millis(20), stream.next())
+                .await
+                .is_err()
+        );
+        drop(guard);
+        timeout(
+            Duration::from_secs(1),
+            stream.subscribe(SubscribeParams::public("ticker", vec!["BTC/USD".into()])),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        stream.close().await.unwrap();
+        release.send(()).unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn test_subscription_key() {

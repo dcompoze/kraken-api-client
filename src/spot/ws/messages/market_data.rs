@@ -42,6 +42,9 @@ pub struct TickerData {
     pub change: Decimal,
     /// Price change (percentage).
     pub change_pct: Decimal,
+    /// Exchange timestamp in RFC3339 format, when supplied.
+    #[serde(default)]
+    pub timestamp: Option<String>,
 }
 
 /// Order book update message.

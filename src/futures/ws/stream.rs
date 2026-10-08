@@ -1,6 +1,7 @@
 //! Futures WebSocket stream implementation.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -10,7 +11,8 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::time::{Interval, interval};
+use tokio::task::JoinHandle;
+use tokio::time::{Interval, Sleep, interval, sleep, timeout};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_tls_with_config};
 
@@ -22,6 +24,7 @@ use crate::futures::ws::messages::*;
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = SplitSink<WsStream, WsMessage>;
 type WsReceiver = SplitStream<WsStream>;
+type StreamFuture<T> = Pin<Box<dyn Future<Output = Result<T, KrakenError>> + Send + Sync>>;
 
 /// Events from the Futures WebSocket connection.
 #[derive(Debug, Clone)]
@@ -95,7 +98,10 @@ pub struct FuturesStream {
     last_message: Instant,
     reconnect_attempt: u32,
     connected: bool,
-    reconnecting: bool,
+    reconnect_future: Option<StreamFuture<Self>>,
+    ping_task: Option<JoinHandle<Result<(), KrakenError>>>,
+    pong_deadline: Option<Pin<Box<Sleep>>>,
+    closed: bool,
     authenticated: bool,
     /// Waiting for challenge response
     pending_auth: bool,
@@ -106,7 +112,7 @@ impl std::fmt::Debug for FuturesStream {
         f.debug_struct("FuturesStream")
             .field("url", &self.url)
             .field("connected", &self.connected)
-            .field("reconnecting", &self.reconnecting)
+            .field("reconnecting", &self.reconnect_future.is_some())
             .field("authenticated", &self.authenticated)
             .field("subscriptions", &self.subscriptions.len())
             .finish()
@@ -125,11 +131,7 @@ impl FuturesStream {
         config: WsConfig,
         credentials: Arc<dyn CredentialsProvider>,
     ) -> Result<Self, KrakenError> {
-        crate::tls::require_secure_url(
-            url,
-            "wss",
-            config.danger_allow_insecure_transport,
-        )?;
+        crate::tls::require_secure_url(url, "wss", config.danger_allow_insecure_transport)?;
         let mut stream = Self::connect(url, config, Some(credentials)).await?;
         stream.authenticate().await?;
         Ok(stream)
@@ -163,7 +165,10 @@ impl FuturesStream {
             last_message: Instant::now(),
             reconnect_attempt: 0,
             connected: true,
-            reconnecting: false,
+            reconnect_future: None,
+            ping_task: None,
+            pong_deadline: None,
+            closed: false,
             authenticated: false,
             pending_auth: false,
         })
@@ -247,6 +252,7 @@ impl FuturesStream {
         feed: &str,
         product_ids: Vec<&str>,
     ) -> Result<(), KrakenError> {
+        self.ensure_connected()?;
         let product_ids: Vec<String> = product_ids.into_iter().map(|s| s.to_string()).collect();
         let key = subscription_key(feed, &product_ids);
 
@@ -267,6 +273,7 @@ impl FuturesStream {
     ///
     /// Requires prior authentication via `connect_private`.
     pub async fn subscribe_private(&mut self, feed: &str) -> Result<(), KrakenError> {
+        self.ensure_connected()?;
         let auth = self
             .auth_state
             .as_ref()
@@ -302,6 +309,7 @@ impl FuturesStream {
             .as_ref()
             .ok_or_else(|| KrakenError::WebSocketMsg("Not authenticated".into()))?;
 
+        self.ensure_connected()?;
         let product_ids: Vec<String> = product_ids.into_iter().map(|s| s.to_string()).collect();
         let key = subscription_key(feed, &product_ids);
 
@@ -329,6 +337,7 @@ impl FuturesStream {
         feed: &str,
         product_ids: Vec<&str>,
     ) -> Result<(), KrakenError> {
+        self.ensure_connected()?;
         let product_ids: Vec<String> = product_ids.into_iter().map(|s| s.to_string()).collect();
         let key = subscription_key(feed, &product_ids);
         self.subscriptions.remove(&key);
@@ -337,21 +346,26 @@ impl FuturesStream {
         self.send_json(&request).await
     }
 
+    fn ensure_connected(&self) -> Result<(), KrakenError> {
+        if !self.connected {
+            return Err(KrakenError::WebSocketMsg("Not connected".into()));
+        }
+        Ok(())
+    }
+
     /// Send a JSON message.
-    async fn send_json<T: serde::Serialize>(&self, msg: &T) -> Result<(), KrakenError> {
-        let sink = self
-            .sink
-            .as_ref()
-            .ok_or_else(|| KrakenError::WebSocketMsg("Not connected".into()))?;
-
-        let json = serde_json::to_string(msg).map_err(|e| {
-            KrakenError::WebSocketMsg(format!("Failed to serialize message: {}", e))
-        })?;
-
-        let mut sink = sink.lock().await;
-        sink.send(WsMessage::Text(json.into()))
-            .await
-            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to send message: {}", e)))
+    fn send_json<T: serde::Serialize>(
+        &self,
+        msg: &T,
+    ) -> impl Future<Output = Result<(), KrakenError>> + Send + Sync + use<T> {
+        let sink = self.sink.clone();
+        let json = serde_json::to_string(msg);
+        async move {
+            let sink = sink.ok_or_else(|| KrakenError::WebSocketMsg("Not connected".into()))?;
+            let json = json.map_err(KrakenError::Json)?;
+            sink.lock().await.send(WsMessage::Text(json.into())).await?;
+            Ok(())
+        }
     }
 
     /// Check if we should reconnect.
@@ -363,7 +377,6 @@ impl FuturesStream {
     }
 
     /// Calculate backoff duration for reconnection.
-    #[allow(dead_code)]
     fn backoff_duration(&self) -> Duration {
         let base = self.config.initial_backoff.as_millis() as u64;
         let max = self.config.max_backoff.as_millis() as u64;
@@ -372,45 +385,44 @@ impl FuturesStream {
         Duration::from_millis(backoff_ms)
     }
 
-    /// Attempt to reconnect.
-    #[allow(dead_code)]
-    async fn reconnect(&mut self) -> Result<(), KrakenError> {
-        self.reconnect_attempt += 1;
-        self.connected = false;
-        self.reconnecting = true;
-        self.authenticated = false;
+    /// Schedule a reconnect, including subscription restoration.
+    fn reconnect(&mut self) {
+        let backoff = self.backoff_duration();
+        self.reconnect_attempt = self.reconnect_attempt.saturating_add(1);
+        let url = self.url.clone();
+        let config = self.config.clone();
+        let subscriptions = self.subscriptions.clone();
+        let credentials = self.credentials.clone();
+        self.reconnect_future = Some(Box::pin(async move {
+            sleep(backoff).await;
+            timeout(Duration::from_secs(10), async move {
+                let mut stream = Self::connect(&url, config, credentials).await?;
+                if stream.credentials.is_some() {
+                    stream.authenticate().await?;
+                }
+                stream.subscriptions = subscriptions;
+                stream.restore_subscriptions().await?;
+                Ok(stream)
+            })
+            .await
+            .map_err(|_| KrakenError::WebSocketMsg("Reconnect timed out".into()))?
+        }));
+    }
 
+    fn disconnect(&mut self) {
+        self.connected = false;
         self.sink = None;
         self.receiver = None;
-
-        let backoff = self.backoff_duration();
-        tokio::time::sleep(backoff).await;
-
-        let connector = crate::tls::websocket_connector_for_url(&self.url)?;
-        let (ws_stream, _) =
-            connect_async_tls_with_config(&self.url, None, false, Some(connector))
-            .await
-            .map_err(|e| KrakenError::WebSocketMsg(format!("Failed to reconnect: {}", e)))?;
-
-        let (sink, receiver) = ws_stream.split();
-        self.sink = Some(Arc::new(Mutex::new(sink)));
-        self.receiver = Some(receiver);
-        self.connected = true;
-        self.reconnecting = false;
-        self.reconnect_attempt = 0;
-        self.last_message = Instant::now();
-
-        if self.credentials.is_some() {
-            self.authenticate().await?;
+        if let Some(task) = self.ping_task.take() {
+            task.abort();
         }
-
-        self.restore_subscriptions().await?;
-
-        Ok(())
+        self.pong_deadline = None;
+        self.authenticated = false;
+        self.auth_state = None;
+        self.pending_auth = false;
     }
 
     /// Restore subscriptions after reconnection.
-    #[allow(dead_code)]
     async fn restore_subscriptions(&mut self) -> Result<(), KrakenError> {
         let subs: Vec<_> = self.subscriptions.values().cloned().collect();
 
@@ -576,14 +588,18 @@ impl FuturesStream {
         None
     }
 
-    /// Close the connection gracefully.
+    /// Close the connection without reconnecting.
     pub async fn close(&mut self) -> Result<(), KrakenError> {
-        if let Some(sink) = self.sink.take() {
-            let mut sink = sink.lock().await;
-            let _ = sink.send(WsMessage::Close(None)).await;
+        self.closed = true;
+        self.reconnect_future = None;
+        let sink = self.sink.clone();
+        self.disconnect();
+        if let Some(sink) = sink {
+            let _ = timeout(self.config.pong_timeout, async move {
+                sink.lock().await.send(WsMessage::Close(None)).await
+            })
+            .await;
         }
-        self.receiver = None;
-        self.connected = false;
         Ok(())
     }
 
@@ -598,91 +614,121 @@ impl FuturesStream {
     }
 }
 
+impl Drop for FuturesStream {
+    fn drop(&mut self) {
+        if let Some(task) = &self.ping_task {
+            task.abort();
+        }
+    }
+}
+
 impl Stream for FuturesStream {
     type Item = Result<FuturesWsEvent, KrakenError>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.ping_interval.poll_tick(cx).is_ready() && self.connected {
-            // The Futures WebSocket API does not use explicit ping messages like Spot v2.
-            // Connection health relies on the protocol-level ping/pong that tokio-tungstenite handles automatically.
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.closed {
+            return Poll::Ready(None);
         }
 
-        if let Some(receiver) = self.receiver.as_mut() {
-            match Pin::new(receiver).poll_next(cx) {
-                Poll::Ready(Some(Ok(msg))) => {
-                    let this = self.as_mut().get_mut();
-                    match msg {
-                        WsMessage::Text(text) => {
-                            if let Some(event) = this.parse_message(&text) {
-                                return Poll::Ready(Some(Ok(event)));
-                            }
-                            // A `None` from parsing (e.g. a challenge during auth) means keep polling.
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Binary(data) => {
-                            if let Ok(text) = String::from_utf8(data.to_vec()) {
-                                if let Some(event) = this.parse_message(&text) {
-                                    return Poll::Ready(Some(Ok(event)));
-                                }
-                            }
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Ping(_) | WsMessage::Pong(_) => {
-                            // Handled automatically by tungstenite.
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                        WsMessage::Close(_) => {
-                            this.connected = false;
-                            if this.should_reconnect() {
-                                return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
-                                    attempt: this.reconnect_attempt + 1,
-                                })));
-                            } else {
-                                return Poll::Ready(Some(Ok(FuturesWsEvent::Disconnected)));
-                            }
-                        }
-                        WsMessage::Frame(_) => {
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-                    }
+        if let Some(reconnect) = &mut this.reconnect_future {
+            match reconnect.as_mut().poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(stream)) => {
+                    *this = stream;
+                    return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnected)));
                 }
-                Poll::Ready(Some(Err(e))) => {
-                    let this = self.as_mut().get_mut();
-                    this.connected = false;
-                    tracing::warn!("WebSocket error: {}", e);
-
-                    if this.should_reconnect() {
-                        return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
-                            attempt: this.reconnect_attempt + 1,
-                        })));
-                    } else {
-                        return Poll::Ready(Some(Err(KrakenError::WebSocket(e))));
-                    }
+                Poll::Ready(Err(error)) => {
+                    tracing::warn!(%error, attempt = this.reconnect_attempt, "WebSocket reconnect failed");
+                    this.reconnect_future = None;
                 }
-                Poll::Ready(None) => {
-                    let this = self.as_mut().get_mut();
-                    this.connected = false;
+            }
+        }
 
-                    if this.should_reconnect() {
-                        return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
-                            attempt: this.reconnect_attempt + 1,
-                        })));
-                    } else {
-                        return Poll::Ready(None);
-                    }
+        if !this.connected {
+            if this.should_reconnect() {
+                this.reconnect();
+                return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
+                    attempt: this.reconnect_attempt,
+                })));
+            }
+            this.closed = true;
+            return Poll::Ready(Some(Ok(FuturesWsEvent::Disconnected)));
+        }
+
+        if this.pong_deadline.is_none()
+            && this.ping_task.is_none()
+            && this.ping_interval.poll_tick(cx).is_ready()
+        {
+            if let Some(sink) = this.sink.clone() {
+                this.ping_task = Some(tokio::spawn(async move {
+                    sink.lock()
+                        .await
+                        .send(WsMessage::Ping(Vec::new().into()))
+                        .await?;
+                    Ok(())
+                }));
+            }
+            this.pong_deadline = Some(Box::pin(sleep(this.config.pong_timeout)));
+        }
+
+        if let Some(ping) = &mut this.ping_task {
+            match Pin::new(ping).poll(cx) {
+                Poll::Ready(Ok(Ok(()))) => this.ping_task = None,
+                Poll::Ready(result) => {
+                    tracing::warn!(?result, "WebSocket ping failed");
+                    this.disconnect();
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
                 }
                 Poll::Pending => {}
             }
-        } else if !self.reconnecting && self.should_reconnect() {
-            return Poll::Ready(Some(Ok(FuturesWsEvent::Reconnecting {
-                attempt: self.reconnect_attempt + 1,
-            })));
         }
 
+        if let Some(deadline) = &mut this.pong_deadline {
+            if deadline.as_mut().poll(cx).is_ready() {
+                tracing::warn!("WebSocket pong timed out");
+                this.disconnect();
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+        }
+
+        let Some(receiver) = &mut this.receiver else {
+            return Poll::Pending;
+        };
+        match Pin::new(receiver).poll_next(cx) {
+            Poll::Ready(Some(Ok(message))) => match message {
+                WsMessage::Text(text) => {
+                    if let Some(event) = this.parse_message(&text) {
+                        return Poll::Ready(Some(Ok(event)));
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    if let Ok(text) = String::from_utf8(data.to_vec()) {
+                        if let Some(event) = this.parse_message(&text) {
+                            return Poll::Ready(Some(Ok(event)));
+                        }
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    this.pong_deadline = None;
+                }
+                WsMessage::Close(_) => this.disconnect(),
+                _ => {}
+            },
+            Poll::Ready(Some(Err(error))) => {
+                tracing::warn!(%error, "WebSocket receive failed");
+                this.disconnect();
+                if !this.should_reconnect() {
+                    this.closed = true;
+                    return Poll::Ready(Some(Err(KrakenError::WebSocket(error))));
+                }
+            }
+            Poll::Ready(None) => this.disconnect(),
+            Poll::Pending => return Poll::Pending,
+        }
+        cx.waker().wake_by_ref();
         Poll::Pending
     }
 }
@@ -699,6 +745,39 @@ fn subscription_key(feed: &str, product_ids: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_next_does_not_block_subscriptions() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (release, hold) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            hold.await.unwrap();
+        });
+        let mut stream = FuturesStream::connect_public(&url, WsConfig::default())
+            .await
+            .unwrap();
+        let sink = stream.sink.as_ref().unwrap().clone();
+        let guard = sink.lock().await;
+        assert!(
+            timeout(Duration::from_millis(20), stream.next())
+                .await
+                .is_err()
+        );
+        drop(guard);
+        timeout(
+            Duration::from_secs(1),
+            stream.subscribe_public("ticker", vec!["PI_XBTUSD"]),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        stream.close().await.unwrap();
+        release.send(()).unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn test_subscription_key_with_products() {
